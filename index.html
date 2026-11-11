@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Spotlight 5 — интерактивная карта английского языка</title>
+<meta name="description" content="Большая интерактивная mind map по всем модулям Spotlight 5: лексика, грамматика, разговорные фразы, тексты для чтения и задания с ответами.">
+<meta name="theme-color" content="#05070f">
+<script>
+  try {
+    var savedTheme = JSON.parse(localStorage.getItem('sp5.theme'));
+    if (savedTheme === 'light' || savedTheme === 'dark') document.documentElement.dataset.theme = savedTheme;
+  } catch (e) {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Шрифты не блокируют загрузку: при отсутствии сети страница сразу работает на системных шрифтах -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700&display=swap"></noscript>
+<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/features.css">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
+</head>
+<body>
+
+<!-- иконки -->
+<svg class="sprite" aria-hidden="true" focusable="false" width="0" height="0">
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-fit" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+  <symbol id="i-cards" viewBox="0 0 24 24"><rect x="3" y="5" width="13" height="15" rx="2"/><path d="M8 5V3h11a2 2 0 0 1 2 2v13h-2"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4a2 2 0 0 0-2-2H6.5A2.5 2.5 0 0 0 4 4.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/><path d="M8 7h8M8 10h5"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></symbol>
+  <symbol id="i-print" viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8" rx="1"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></symbol>
+</svg>
+
+<div class="ambient" aria-hidden="true">
+  <span class="orb orb-1"></span>
+  <span class="orb orb-2"></span>
+  <span class="orb orb-3"></span>
+  <div class="grid-backdrop"></div>
+  <div class="grain"></div>
+</div>
+
+<header class="topbar">
+  <a class="brand" href="#" id="brandHome" aria-label="Вся карта">
+    <span class="brand-mark"><svg class="icon"><use href="#i-sparkles"/></svg></span>
+    <span class="brand-copy">
+      <span class="brand-title">Spotlight 5</span>
+      <span class="brand-sub">mind map · английский язык</span>
+    </span>
+  </a>
+
+  <div class="search" id="search">
+    <svg class="icon search-icon"><use href="#i-search"/></svg>
+    <input id="searchInput" type="search" autocomplete="off" spellcheck="false" placeholder="Найти модуль, тему или слово…" aria-label="Поиск по карте" aria-expanded="false" aria-controls="searchResults">
+    <kbd class="search-kbd" id="searchKbd">/</kbd>
+    <div class="search-drop" id="searchResults" role="listbox" hidden></div>
+  </div>
+
+  <div class="top-actions">
+    <button class="progress-pill" id="progressBtn" type="button" title="Ваш прогресс">
+      <span class="progress-ring">
+        <svg viewBox="0 0 36 36" aria-hidden="true">
+          <circle class="ring-track" cx="18" cy="18" r="15.5"/>
+          <circle class="ring-arc" id="ringArc" cx="18" cy="18" r="15.5"/>
+        </svg>
+      </span>
+      <span class="progress-copy"><b id="progressPct">0%</b><i>изучено</i></span>
+    </button>
+    <button class="icon-btn" id="themeBtn" type="button" aria-label="Переключить тему" title="Светлая / тёмная тема">
+      <svg class="icon icon-sun"><use href="#i-sun"/></svg>
+      <svg class="icon icon-moon"><use href="#i-moon"/></svg>
+    </button>
+    <button class="icon-btn" id="helpBtn" type="button" aria-label="Как пользоваться" title="Как пользоваться картой">
+      <svg class="icon"><use href="#i-help"/></svg>
+    </button>
+  </div>
+</header>
+
+<nav class="crumbs" id="crumbs" aria-label="Хлебные крошки"></nav>
+
+<main id="stage" aria-label="Интерактивная карта знаний">
+  <div id="world">
+    <svg id="links" aria-hidden="true" width="12000" height="12000" viewBox="-6000 -6000 12000 12000">
+      <g id="deco">
+        <ellipse id="orbit1" cx="0" cy="0" rx="600" ry="320"></ellipse>
+        <ellipse id="orbit2" cx="0" cy="0" rx="380" ry="200"></ellipse>
+      </g>
+    </svg>
+    <div id="nodes"></div>
+  </div>
+  <div class="map-hint" id="mapHint"><span class="pulse-dot"></span><span id="mapHintText">Нажмите на раздел, чтобы раскрыть темы</span></div>
+</main>
+
+<div class="zoomies" role="group" aria-label="Масштаб">
+  <button class="zoom-btn" id="zoomIn" type="button" aria-label="Приблизить" title="Приблизить"><svg class="icon"><use href="#i-plus"/></svg></button>
+  <button class="zoom-btn" id="zoomOut" type="button" aria-label="Отдалить" title="Отдалить"><svg class="icon"><use href="#i-minus"/></svg></button>
+  <button class="zoom-btn" id="zoomFit" type="button" aria-label="Вписать карту" title="Вписать карту"><svg class="icon"><use href="#i-fit"/></svg></button>
+  <button class="zoom-btn" id="zoomHome" type="button" aria-label="В начало" title="В начало"><svg class="icon"><use href="#i-home"/></svg></button>
+</div>
+
+<div class="dock" id="dock" role="navigation" aria-label="Модули"></div>
+
+<section class="mobile-home" id="mobileHome" aria-label="Модули Spotlight 5">
+  <div class="mh-hero">
+    <p class="eyebrow">Английский язык · 5 класс</p>
+    <h1>SPOTLIGHT <span>5</span></h1>
+    <p class="mh-sub"><b>12</b> разделов · <b>85</b> тем</p>
+    <div class="mh-progress"><i id="mhProgress"></i></div>
+  </div>
+  <div class="mh-grid" id="mhGrid"></div>
+</section>
+
+<div class="scrim" id="scrim"></div>
+
+<aside class="panel" id="panel" aria-hidden="true" aria-labelledby="panelTitle">
+  <div class="panel-head" id="panelHead"></div>
+  <div class="panel-body" id="panelBody"></div>
+  <div class="panel-foot" id="panelFoot"></div>
+</aside>
+
+<div class="modal" id="cardsModal" hidden>
+  <div class="modal-box cards-box" role="dialog" aria-modal="true" aria-labelledby="cardsTitle">
+    <div id="cardsContent"></div>
+  </div>
+</div>
+
+<div class="modal" id="helpModal" hidden>
+  <div class="modal-box help-box" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+    <button class="icon-btn modal-close" data-close-modal type="button" aria-label="Закрыть"><svg class="icon"><use href="#i-x"/></svg></button>
+    <div class="help-head">
+      <span class="help-mark"><svg class="icon"><use href="#i-sparkles"/></svg></span>
+      <div>
+        <p class="eyebrow">Spotlight 5 · how to use</p>
+        <h2 id="helpTitle">Как пользоваться картой</h2>
+      </div>
+    </div>
+    <div class="help-grid">
+      <div class="help-step"><span>01</span><h3>Выберите раздел</h3><p>Нажмите на любую ветку вокруг центра: карта плавно перестроится и покажет блоки раздела.</p></div>
+      <div class="help-step"><span>02</span><h3>Откройте раздел</h3><p>Лексика, грамматика, разговорные фразы и страноведение — каждый раздел раскрывается в отдельные темы.</p></div>
+      <div class="help-step"><span>03</span><h3>Изучайте тему</h3><p>В правой панели — слова с озвучкой, правила, тексты для чтения и задания с ответами. Нажмите на слово, чтобы услышать его.</p></div>
+      <div class="help-step"><span>04</span><h3>Отмечайте прогресс</h3><p>Кнопка «Изучено» сохраняет отметку в браузере. Прогресс виден на модулях и вверху страницы.</p></div>
+    </div>
+    <div class="help-tips">
+      <p><b>Горячие клавиши:</b> <kbd>/</kbd> — поиск, <kbd>Esc</kbd> — назад, <kbd>+</kbd> / <kbd>−</kbd> — масштаб.</p>
+      <p><b>Навигация:</b> карту можно тянуть мышью или пальцем, колесо мыши — масштаб. Кнопка «В начало» возвращает к обзору.</p>
+      <p class="muted">Карта составлена по модулям УМК «Английский в фокусе. Spotlight 5» (Ваулина, Дули, Подоляко, Эванс). Порядок тем соответствует учебнику, формулировки адаптированы для самостоятельного повторения.</p>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/data-1.js"></script>
+<script src="js/data-2.js"></script>
+<script src="js/data-3.js"></script>
+<script src="js/data-reading.js"></script>
+<script src="js/data-theory.js"></script>
+<script src="js/extras-1.js"></script>
+<script src="js/extras-2.js"></script>
+<script src="js/extras-3.js"></script>
+<script src="js/app.js"></script>
+<script src="js/features.js"></script>
+</body>
+</html>
