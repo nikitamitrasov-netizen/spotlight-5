@@ -734,6 +734,22 @@
     return out;
   }
 
+  function saveLast(leaf, scroll, notify) {
+    if (!leaf) return;
+    const payload = {
+      id: leaf.id,
+      title: leaf.title,
+      ru: leaf.ru,
+      module: leaf.moduleNode ? leaf.moduleNode.title : '',
+      label: leaf.moduleNode ? leaf.moduleNode.label : '',
+      color: leaf.moduleNode ? leaf.moduleNode.color : '',
+      scroll: Math.max(0, Math.round(scroll || 0)),
+      at: Date.now()
+    };
+    STORE.set('sp5.last', payload);
+    if (notify) document.dispatchEvent(new CustomEvent('sp5:last', { detail: payload }));
+  }
+
   function openLeaf(id, opts) {
     opts = opts || {};
     const leaf = NODES.get(id);
@@ -743,9 +759,10 @@
 
     state.panelOpen = true;
     state.panelLeafId = id;
-    renderPanel(leaf);
+    renderPanel(leaf, opts);
     panel.classList.add('is-open');
     panel.setAttribute('aria-hidden', 'false');
+    if (opts.scroll) requestAnimationFrame(() => { panelBody.scrollTop = Math.max(0, Number(opts.scroll) || 0); });
     if (window.innerWidth <= 820) scrim.classList.add('is-visible');
 
     NODES.forEach(n => n.el.classList.remove('is-active'));
@@ -759,6 +776,8 @@
   function closePanel(opts) {
     opts = opts || {};
     if (!state.panelOpen) return;
+    const openLeaf = NODES.get(state.panelLeafId);
+    if (openLeaf) saveLast(openLeaf, panelBody.scrollTop, false);
     state.panelOpen = false;
     state.panelLeafId = null;
     panel.classList.remove('is-open');
@@ -768,7 +787,8 @@
     if (!opts.silent) fitCamera(620);
   }
 
-  function renderPanel(leaf) {
+  function renderPanel(leaf, opts) {
+    opts = opts || {};
     const mod = leaf.moduleNode;
     const br = leaf.branchNode;
     const done = state.progress.has(leaf.id);
@@ -796,12 +816,13 @@
       '</div>' +
       '<button class="icon-btn panel-close" type="button" data-close-panel aria-label="Закрыть тему">' + icon('x') + '</button>';
 
-    panelBody.innerHTML = renderBlocks(leaf.data.blocks || [], mod);
-    panelBody.scrollTop = 0;
+    panelBody.innerHTML = renderBlocks(leaf.data.blocks || [], mod, leaf);
+    panelBody.scrollTop = Math.max(0, Number(opts.scroll) || 0);
+    saveLast(leaf, panelBody.scrollTop, true);
     renderPanelFoot(leaf);
   }
 
-  function renderBlocks(blocks, mod) {
+  function renderBlocks(blocks, mod, leaf) {
     return blocks.map(b => {
       if (!b || !b.type) return '';
       if (b.type === 'lead') return '<p class="lead">' + b.text + '</p>';
@@ -919,10 +940,18 @@
         const ps = (b.paragraphs || []).map(p => '<p>' + p + '</p>').join('');
         const gloss = (b.glossary || []).map(g =>
           '<button class="gloss" type="button" data-say="' + attr(g[0]) + '"><b>' + esc(g[0]) + '</b><span>' + esc(g[1]) + '</span>' + icon('volume') + '</button>').join('');
+        const level = leaf && leaf.data && leaf.data.level ? leaf.data.level : '';
+        const words = leaf && leaf.data && leaf.data.words ? leaf.data.words : '';
         return '<section class="block reading">' +
-          '<div class="reading-kicker">Reading</div>' +
-          (b.title ? '<h3>' + esc(b.title) + '</h3>' : '') +
-          '<div class="reading-tools"><button class="read-aloud" type="button" data-read-aloud>' + icon('volume') + '<span>Прослушать текст</span></button></div>' +
+          '<div class="reading-cover" style="--mc:' + (mod ? mod.color : '#8fa2ff') + '">' +
+            '<span class="rc-cover-kicker">Reading' + (level ? ' · ' + esc(level) : '') + '</span>' +
+            '<span class="rc-cover-title">' + esc(b.title || (leaf ? leaf.title : 'Text')) + '</span>' +
+            '<span class="rc-cover-meta">' + (words ? words + ' слов · ' : '') + '5 класс</span>' +
+          '</div>' +
+          '<div class="reading-tools">' +
+            '<button class="read-aloud" type="button" data-read-aloud>' + icon('volume') + '<span>Прослушать текст</span></button>' +
+            '<button class="read-aloud" type="button" data-reading-mode>' + icon('book') + '<span>Режим чтения</span></button>' +
+          '</div>' +
           ps +
           (gloss ? '<div class="glossary">' + gloss + '</div>' : '') +
           '</section>';
@@ -1463,6 +1492,18 @@
         if (ps) speak(ps);
         return;
       }
+      if (e.target.closest('[data-reading-mode]')) {
+        const sec = e.target.closest('.reading');
+        if (!sec) return;
+        const on = sec.classList.toggle('is-reading');
+        const btn = e.target.closest('[data-reading-mode]');
+        if (btn) {
+          btn.classList.toggle('is-on', on);
+          const label = btn.querySelector('span');
+          if (label) label.textContent = on ? 'Обычный вид' : 'Режим чтения';
+        }
+        return;
+      }
       const prev = e.target.closest('[data-prev]');
       if (prev) {
         const lf = NODES.get(state.panelLeafId);
@@ -1524,6 +1565,16 @@
       const say = e.target.closest('[data-say]');
       if (say) speak(say.getAttribute('data-say'));
     });
+
+    let lastScrollSave = 0;
+    panelBody.addEventListener('scroll', () => {
+      if (!state.panelLeafId) return;
+      const now = Date.now();
+      if (now - lastScrollSave < 350) return;
+      lastScrollSave = now;
+      const lf = NODES.get(state.panelLeafId);
+      if (lf) saveLast(lf, panelBody.scrollTop, false);
+    }, { passive: true });
 
     panelBody.addEventListener('keydown', e => {
       if (e.key !== 'Enter' && e.key !== ' ') return;

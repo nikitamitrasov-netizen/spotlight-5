@@ -14,6 +14,8 @@
     readLevel: 'all',
     readQuery: '',
     test: null,
+    route: null,
+    game: null,
     welcomeTimer: null
   };
   let deferredPrompt = null;
@@ -66,6 +68,24 @@
     return Array.from(map.values());
   }
 
+  function gameWords(mod, count) {
+    count = count || 6;
+    const out = [];
+    const seen = new Set();
+    const add = w => {
+      if (!w || !w[0] || !w[1]) return;
+      const en = String(w[0]).trim();
+      if (en.length < 3 || /^[A-Za-z]{1,2}$/.test(en)) return;
+      const key = en.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(w);
+    };
+    shuffle(SP5.moduleWords(mod)).forEach(add);
+    if (out.length < count) shuffle(allVocab()).forEach(add);
+    return out.slice(0, count);
+  }
+
   /* -------------------------------------------------------------- modals */
   function makeModal(id, html, cls) {
     let m = document.getElementById(id);
@@ -97,11 +117,20 @@
     const open = $$('.sp5-modal:not([hidden])').pop();
     if (open) { e.preventDefault(); closeModal(open); }
     cleanupSpeaking();
+    stopGameTimer();
   });
+
+  function stopGameTimer() {
+    if (state.game && state.game.timer) {
+      clearInterval(state.game.timer);
+      state.game.timer = null;
+    }
+  }
 
   function closeAllSp5() {
     $$('.sp5-modal:not([hidden])').forEach(m => { m.hidden = true; });
     document.body.classList.remove('modal-open');
+    stopGameTimer();
   }
 
   /* ------------------------------------------------------- reading library */
@@ -271,6 +300,8 @@
       '</div>' +
       '<div class="sp5-actions">' +
         '<button class="sp5-btn primary" type="button" data-open-dash-test>' + icon('target') + 'Пройти тест</button>' +
+        '<button class="sp5-btn" type="button" data-route>' + icon('sparkles') + '5 минут</button>' +
+        '<button class="sp5-btn" type="button" data-game>' + icon('grid') + 'Игра 2 минуты</button>' +
         '<button class="sp5-btn" type="button" data-speaking>' + icon('mic') + 'Говорение</button>' +
         '<button class="sp5-btn" type="button" data-export>' + icon('download') + 'Экспорт CSV</button>' +
         '<button class="sp5-btn" type="button" data-print>' + icon('print') + 'Печать отчёта</button>' +
@@ -314,6 +345,16 @@
     if (speakBtn) speakBtn.addEventListener('click', () => {
       closeModal(dashModal);
       openSpeakingPicker();
+    });
+    const routeBtn = $('[data-route]', body);
+    if (routeBtn) routeBtn.addEventListener('click', () => {
+      closeModal(dashModal);
+      openRoute();
+    });
+    const gameBtn = $('[data-game]', body);
+    if (gameBtn) gameBtn.addEventListener('click', () => {
+      closeModal(dashModal);
+      openGame();
     });
     const exportBtn = $('[data-export]', body);
     if (exportBtn) exportBtn.addEventListener('click', exportCSV);
@@ -724,6 +765,725 @@
     }
   }
 
+  /* ------------------------------------------------------- last / streak */
+  function lastPlace() {
+    const last = readJSON('sp5.last', null);
+    if (!last || !last.id || !SP5.NODES.has(last.id)) return null;
+    return last;
+  }
+
+  function streakInfo() {
+    const s = readJSON('sp5.streak', {});
+    return { last: s && s.last ? s.last : '', count: Number(s && s.count) || 0 };
+  }
+
+  function bumpStreak() {
+    const s = streakInfo();
+    const today = new Date().toDateString();
+    if (s.last === today) return s;
+    const yesterday = new Date(Date.now() - 86400000).toDateString();
+    const count = s.last === yesterday ? s.count + 1 : 1;
+    const next = { last: today, count: count };
+    writeJSON('sp5.streak', next);
+    return next;
+  }
+
+  function streakLabel(info) {
+    const n = (info && info.count) || 0;
+    if (!n) return 'начни сегодня';
+    const tail = n % 100 >= 11 && n % 100 <= 14 ? 'дней' : (n % 10 === 1 ? 'день' : (n % 10 >= 2 && n % 10 <= 4 ? 'дня' : 'дней'));
+    return '🔥 ' + n + ' ' + tail + ' подряд';
+  }
+
+  function routeModule() {
+    const last = lastPlace();
+    if (last) {
+      const lf = SP5.NODES.get(last.id);
+      if (lf && lf.moduleNode) return lf.moduleNode;
+    }
+    return SP5.MODULES.find(mod => SP5.moduleLeaves(mod).some(lf => !SP5.state.progress.has(lf.id))) || SP5.MODULES[0];
+  }
+
+  function makeWordQuestion(w, words, pool) {
+    const local = words.filter(x => x && x[1] && x[0].toLowerCase() !== String(w[0]).toLowerCase() && x[1] !== w[1]);
+    const source = local.length >= 2 ? local : pool.filter(x => x && x[1] && x[0].toLowerCase() !== String(w[0]).toLowerCase() && x[1] !== w[1]);
+    const distract = shuffle(source).slice(0, 2);
+    const options = shuffle(Array.from(new Set([w[1]].concat(distract.map(x => x[1])))));
+    return {
+      kind: 'vocab',
+      q: 'Как переводится <b>' + esc(w[0]) + '</b>?',
+      options: options,
+      correct: options.indexOf(w[1]),
+      explain: '<b>' + esc(w[0]) + '</b> — ' + esc(w[1]),
+      word: w
+    };
+  }
+
+  function findRuleFor(mod) {
+    let found = null;
+    (mod.children || []).forEach(br => (br.children || []).forEach(lf => {
+      if (found) return;
+      (lf.data.blocks || []).forEach(b => {
+        if (found) return;
+        if (b.type === 'rule' && b.items && b.items.length) {
+          found = { leaf: lf, rule: b.items[0] };
+        }
+      });
+    }));
+    return found;
+  }
+
+  function buildRoute() {
+    const mod = routeModule();
+    if (!mod) return null;
+    const words = gameWords(mod, 8);
+    const pool = allVocab();
+    const picked = words.slice(0, 5);
+    const wordQs = picked.map(w => makeWordQuestion(w, words, pool));
+    const choices = shuffle(readingQuestions(mod)).slice(0, 3);
+    const ruleInfo = findRuleFor(mod);
+    return {
+      mod: mod,
+      words: picked,
+      wordQs: wordQs,
+      choices: choices,
+      rule: ruleInfo ? ruleInfo.rule : null,
+      ruleLeaf: ruleInfo ? ruleInfo.leaf : null,
+      step: 'intro',
+      qi: 0,
+      ci: 0,
+      score: 0,
+      answered: false
+    };
+  }
+
+  let routeModal = null;
+
+  function ensureRouteModal() {
+    if (routeModal) return;
+    routeModal = makeModal('routeModal',
+      '<div class="modal-box route-box" role="dialog" aria-modal="true" aria-labelledby="routeTitle">' +
+        '<div id="routeBody"></div></div>'
+    );
+    routeModal.addEventListener('click', e => {
+      const s = state.route;
+      if (!s) return;
+      if (e.target.closest('[data-route-start]')) { s.step = s.wordQs.length ? 'word' : (s.rule ? 'rule' : 'choice'); s.qi = 0; s.ci = 0; s.answered = false; s.score = 0; renderRoute(); return; }
+      if (e.target.closest('[data-route-continue]')) { const last = lastPlace(); if (last) { closeModal(routeModal); SP5.openLeaf(last.id, { scroll: last.scroll }); } return; }
+      if (e.target.closest('[data-route-opt]')) { answerRoute(parseInt(e.target.closest('[data-route-opt]').dataset.routeOpt, 10)); return; }
+      if (e.target.closest('[data-route-next]')) { nextRoute(); return; }
+      if (e.target.closest('[data-route-rule-done]')) { s.step = s.choices.length ? 'choice' : 'done'; s.ci = 0; s.answered = false; if (s.step === 'done') finishRoute(); else renderRoute(); return; }
+      if (e.target.closest('[data-route-again]')) { openRoute(); return; }
+      if (e.target.closest('[data-route-game]')) { closeModal(routeModal); openGame(s.mod.id); return; }
+      if (e.target.closest('[data-route-speak]')) { const q = s.step === 'word' ? s.wordQs[s.qi] : s.choices[s.ci]; if (q && q.word) SP5.speak(q.word[0]); return; }
+      if (e.target.closest('[data-route-close]')) closeModal(routeModal);
+    });
+  }
+
+  function openRoute() {
+    state.route = buildRoute();
+    if (!state.route) { SP5.toast('Не удалось собрать маршрут'); return; }
+    ensureRouteModal();
+    renderRoute();
+    openModal(routeModal);
+  }
+
+  function routeHead(title, subtitle) {
+    return '<div class="sp5-head"><div><p class="eyebrow">5 минут английского</p><h2 id="routeTitle">' + esc(title) + '</h2>' +
+      '<p>' + esc(subtitle) + '</p></div><button class="icon-btn" type="button" data-close-modal aria-label="Закрыть">' + icon('x') + '</button></div>';
+  }
+
+  function renderRoute() {
+    const s = state.route;
+    if (!s) return;
+    const body = $('#routeBody');
+    const st = streakInfo();
+    const total = s.wordQs.length + s.choices.length;
+    const passed = s.score;
+    if (s.step === 'intro') {
+      body.innerHTML = routeHead('Пять минут — и есть результат', s.mod.label + ' · ' + s.mod.title) +
+        '<div class="sp5-body">' +
+          '<div class="route-intro">' +
+            '<div class="route-steps">' +
+              '<div><b>' + s.wordQs.length + '</b><span>слов</span></div>' +
+              '<div><b>' + (s.rule ? '1' : '0') + '</b><span>правило</span></div>' +
+              '<div><b>' + s.choices.length + '</b><span>задания</span></div>' +
+            '</div>' +
+            '<p class="route-note">Короткий маршрут: слова, одно правило и три вопроса. Без бесконечной прокрутки.</p>' +
+            '<div class="route-streak">' + esc(streakLabel(st)) + '</div>' +
+            (lastPlace() ? '<button class="route-last" type="button" data-route-continue><span>Продолжить с места</span><b>' + esc(lastPlace().title) + '</b></button>' : '') +
+            '<div class="sp5-actions"><button class="sp5-btn primary" type="button" data-route-start>Начать 5 минут ' + icon('arrow-right') + '</button></div>' +
+          '</div>' +
+        '</div>';
+      return;
+    }
+    if (s.step === 'word') {
+      const q = s.wordQs[s.qi];
+      if (!q) { s.step = s.rule ? 'rule' : 'choice'; renderRoute(); return; }
+      body.innerHTML = routeHead('Слова', s.mod.title + ' · ' + (s.qi + 1) + ' из ' + s.wordQs.length) +
+        '<div class="sp5-body">' +
+          '<div class="test-progress"><i style="width:' + Math.round((s.qi / s.wordQs.length) * 100) + '%"></i></div>' +
+          '<div class="route-count">Слово ' + (s.qi + 1) + ' из ' + s.wordQs.length + ' · верно: ' + s.score + '</div>' +
+          '<div class="test-q">' + q.q + '</div>' +
+          '<div class="test-options">' + q.options.map((o, i) => '<button class="test-opt" type="button" data-route-opt="' + i + '">' + esc(o) + '</button>').join('') + '</div>' +
+          '<div id="routeFeedback"></div>' +
+          '<div class="test-foot"><span class="test-count">' + (s.qi + 1) + ' / ' + s.wordQs.length + '</span>' +
+          '<button class="sp5-btn primary" type="button" data-route-next disabled>Дальше ' + icon('arrow-right') + '</button></div>' +
+        '</div>';
+      return;
+    }
+    if (s.step === 'rule') {
+      const r = s.rule;
+      body.innerHTML = routeHead('Одно правило', s.mod.title + ' · ' + (r ? r.title : 'Правило')) +
+        '<div class="sp5-body">' +
+          '<div class="route-rule">' +
+            '<p class="route-kicker">ЗАПОМНИ</p>' +
+            '<h3>' + (r ? r.title : 'Правило') + '</h3>' +
+            '<div>' + (r ? r.text : '') + '</div>' +
+            (r && r.examples ? '<div class="route-examples">' + r.examples.map(e => '<div><b>' + esc(e[0]) + '</b><span>' + esc(e[1]) + '</span></div>').join('') + '</div>' : '') +
+          '</div>' +
+          '<div class="sp5-actions"><button class="sp5-btn primary" type="button" data-route-rule-done>Понятно, дальше ' + icon('arrow-right') + '</button></div>' +
+        '</div>';
+      return;
+    }
+    if (s.step === 'choice') {
+      const q = s.choices[s.ci];
+      if (!q) { s.step = 'done'; finishRoute(); return; }
+      body.innerHTML = routeHead('Три вопроса', s.mod.title + ' · ' + (s.ci + 1) + ' из ' + s.choices.length) +
+        '<div class="sp5-body">' +
+          '<div class="test-progress"><i style="width:' + Math.round((s.ci / s.choices.length) * 100) + '%"></i></div>' +
+          '<div class="route-count">Вопрос ' + (s.ci + 1) + ' из ' + s.choices.length + ' · верно: ' + s.score + '</div>' +
+          '<div class="test-q">' + q.q + '</div>' +
+          '<div class="test-options">' + q.options.map((o, i) => '<button class="test-opt" type="button" data-route-opt="' + i + '">' + esc(o) + '</button>').join('') + '</div>' +
+          '<div id="routeFeedback"></div>' +
+          '<div class="test-foot"><span class="test-count">' + (s.ci + 1) + ' / ' + s.choices.length + '</span>' +
+          '<button class="sp5-btn primary" type="button" data-route-next disabled>Дальше ' + icon('arrow-right') + '</button></div>' +
+        '</div>';
+      return;
+    }
+    body.innerHTML = routeHead('Пять минут позади', s.mod.label + ' · ' + s.mod.title) +
+      '<div class="sp5-body"><div class="route-done">' +
+        '<div class="big">✨</div>' +
+        '<h3>Хороший старт!</h3>' +
+        '<p>Верно <b>' + passed + ' из ' + total + '</b> шагов. ' + esc(streakLabel(streakInfo())) + '</p>' +
+        '<div class="sp5-actions">' +
+          '<button class="sp5-btn primary" type="button" data-route-game>Играть 2 минуты</button>' +
+          '<button class="sp5-btn" type="button" data-route-again>Ещё 5 минут</button>' +
+          '<button class="sp5-btn" type="button" data-route-close>Закрыть</button>' +
+        '</div>' +
+      '</div></div>';
+  }
+
+  function answerRoute(chosen) {
+    const s = state.route;
+    if (!s || s.answered) return;
+    if (s.step !== 'word' && s.step !== 'choice') return;
+    const q = s.step === 'word' ? s.wordQs[s.qi] : s.choices[s.ci];
+    if (!q) return;
+    s.answered = true;
+    const opts = $$('[data-route-opt]', $('#routeBody'));
+    opts.forEach((b, i) => {
+      b.disabled = true;
+      if (i === q.correct) b.classList.add('is-correct');
+    });
+    const ok = chosen === q.correct;
+    if (ok) {
+      s.score++;
+    } else {
+      if (opts[chosen]) opts[chosen].classList.add('is-wrong');
+      if (q.kind === 'vocab' && q.word) SP5.addMistake(q.word[0], q.word[1], s.mod.title);
+    }
+    const fb = $('#routeFeedback');
+    if (fb) fb.innerHTML = '<div class="test-explain"><b>' + (ok ? 'Верно!' : 'Пока неверно.') + '</b> ' + (q.explain || ('Правильный ответ: ' + esc(q.options[q.correct]))) + '</div>';
+    const next = $('[data-route-next]');
+    if (next) { next.disabled = false; next.focus(); }
+  }
+
+  function nextRoute() {
+    const s = state.route;
+    if (!s || !s.answered) return;
+    s.answered = false;
+    if (s.step === 'word') {
+      s.qi++;
+      if (s.qi >= s.wordQs.length) s.step = s.rule ? 'rule' : 'choice';
+      renderRoute();
+      return;
+    }
+    if (s.step === 'choice') {
+      s.ci++;
+      if (s.ci >= s.choices.length) { finishRoute(); return; }
+      renderRoute();
+    }
+  }
+
+  function finishRoute() {
+    const s = state.route;
+    if (!s) return;
+    const routes = readJSON('sp5.routes', []);
+    const list = Array.isArray(routes) ? routes : [];
+    list.push({ module: s.mod.title, score: s.score, total: s.wordQs.length + s.choices.length, date: new Date().toISOString() });
+    writeJSON('sp5.routes', list.slice(-30));
+    bumpStreak();
+    s.step = 'done';
+    renderRoute();
+    renderNextHero();
+    boom();
+  }
+
+  /* --------------------------------------------------------- memory game */
+  let gameModal = null;
+
+  function ensureGameModal() {
+    if (gameModal) return;
+    gameModal = makeModal('gameModal',
+      '<div class="modal-box route-box" role="dialog" aria-modal="true" aria-labelledby="gameTitle">' +
+        '<div id="gameBody"></div></div>'
+    );
+    gameModal.addEventListener('click', e => {
+      if (e.target.closest('[data-game-again]')) {
+        const g = state.game;
+        const id = g ? g.mod.id : null;
+        const mode = g ? g.mode : 'memory';
+        closeModal(gameModal);
+        if (id) {
+          if (mode === 'match') openMatch(id);
+          else if (mode === 'listen') openListen(id);
+          else openGame(id);
+        }
+        return;
+      }
+      if (e.target.closest('[data-game-switch]')) {
+        const id = state.game ? state.game.mod.id : null;
+        const mode = e.target.closest('[data-game-switch]').dataset.gameSwitch;
+        if (!id) return;
+        if (mode === 'match') openMatch(id);
+        else if (mode === 'listen') openListen(id);
+        else openGame(id);
+        return;
+      }
+      if (e.target.closest('[data-close-modal]') || e.target === gameModal) {
+        if (state.game && state.game.timer) clearInterval(state.game.timer);
+      }
+      if (e.target.closest('[data-listen-play]')) { speakListen(); return; }
+      const listenOpt = e.target.closest('[data-listen-opt]');
+      if (listenOpt) { answerListen(parseInt(listenOpt.dataset.listenOpt, 10)); return; }
+      if (e.target.closest('[data-listen-next]')) { nextListen(); return; }
+      const en = e.target.closest('[data-match-en]');
+      if (en) { matchSelect('en', en.dataset.matchEn); return; }
+      const ru = e.target.closest('[data-match-ru]');
+      if (ru) { matchSelect('ru', ru.dataset.matchRu); return; }
+      const card = e.target.closest('[data-mem]');
+      if (card) flipGame(parseInt(card.dataset.mem, 10));
+    });
+    gameModal.addEventListener('dragstart', e => {
+      const en = e.target.closest('[data-match-en]');
+      if (!en || !state.game || state.game.mode !== 'match') return;
+      e.dataTransfer.setData('text/plain', en.dataset.matchEn);
+      e.dataTransfer.effectAllowed = 'move';
+      matchSelect('en', en.dataset.matchEn);
+    });
+    gameModal.addEventListener('dragover', e => {
+      if (e.target.closest('[data-match-ru]')) e.preventDefault();
+    });
+    gameModal.addEventListener('drop', e => {
+      const ru = e.target.closest('[data-match-ru]');
+      if (!ru || !state.game || state.game.mode !== 'match') return;
+      e.preventDefault();
+      const key = e.dataTransfer.getData('text/plain');
+      if (key === '') return;
+      state.game.selectedEn = key;
+      matchSelect('ru', ru.dataset.matchRu);
+    });
+  }
+
+  function openGame(modId) {
+    const mod = modId ? SP5.NODES.get(modId) : routeModule();
+    if (!mod) return;
+    const words = gameWords(mod, 6);
+    if (words.length < 3) { SP5.toast('Для игры нужно больше слов'); return; }
+    if (state.game && state.game.timer) clearInterval(state.game.timer);
+    const cards = [];
+    words.forEach((w, i) => {
+      cards.push({ key: i, text: w[0], kind: 'en' });
+      cards.push({ key: i, text: w[1], kind: 'ru' });
+    });
+    state.game = {
+      mode: 'memory',
+      mod: mod,
+      cards: shuffle(cards),
+      first: null,
+      lock: false,
+      matched: 0,
+      moves: 0,
+      left: 120,
+      timer: null
+    };
+    ensureGameModal();
+    renderGame();
+    openModal(gameModal);
+    state.game.timer = setInterval(() => {
+      if (!state.game) return;
+      state.game.left--;
+      const t = $('#gameTime');
+      if (t) t.textContent = formatTime(state.game.left);
+      if (state.game.left <= 0) endGame(false);
+    }, 1000);
+  }
+
+  function formatTime(sec) {
+    const s = Math.max(0, sec);
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  function renderGame() {
+    const s = state.game;
+    if (!s) return;
+    const body = $('#gameBody');
+    body.innerHTML = '<div class="sp5-head"><div><p class="eyebrow">Memory · 2 минуты</p><h2 id="gameTitle">' + esc(s.mod.title) + '</h2>' +
+      '<p>Найди пары «слово — перевод». Открывай по две карточки.</p></div>' +
+      '<button class="icon-btn" type="button" data-close-modal aria-label="Закрыть">' + icon('x') + '</button></div>' +
+      '<div class="sp5-body">' + gameTabs('memory') + '<div class="game-bar"><span>Пар: <b id="gamePairs">' + (s.matched / 2) + '/' + (s.cards.length / 2) + '</b></span>' +
+      '<span>Ходы: <b id="gameMoves">' + s.moves + '</b></span>' +
+      '<span>Время: <b id="gameTime">' + formatTime(s.left) + '</b></span></div>' +
+      '<div class="game-grid">' + s.cards.map((c, i) =>
+        '<button class="mem-card" type="button" data-mem="' + i + '" style="--mc:' + s.mod.color + '">' +
+          '<span class="mem-front">?</span><span class="mem-text">' + esc(c.text) + '</span>' +
+        '</button>').join('') + '</div>' +
+      '<p class="sp5-muted" style="margin-top:12px">Подсказка: перевод и слово — разные карточки.</p></div>';
+  }
+
+  function flipGame(index) {
+    const s = state.game;
+    if (!s || s.lock) return;
+    const card = s.cards[index];
+    if (!card) return;
+    const el = $('[data-mem="' + index + '"]');
+    if (!el || el.classList.contains('is-open') || el.classList.contains('is-matched')) return;
+    el.classList.add('is-open');
+    if (s.first === null) { s.first = index; return; }
+    if (s.first === index) return;
+    const first = s.cards[s.first];
+    s.moves++;
+    const moves = $('#gameMoves');
+    if (moves) moves.textContent = s.moves;
+    if (first.key === card.key) {
+      const a = $('[data-mem="' + s.first + '"]');
+      if (a) a.classList.add('is-matched');
+      el.classList.add('is-matched');
+      s.matched += 2;
+      const pairs = $('#gamePairs');
+      if (pairs) pairs.textContent = (s.matched / 2) + '/' + (s.cards.length / 2);
+      s.first = null;
+      if (s.matched === s.cards.length) setTimeout(() => endGame(true), 250);
+      return;
+    }
+    s.lock = true;
+    const a = $('[data-mem="' + s.first + '"]');
+    setTimeout(() => {
+      if (a) a.classList.remove('is-open');
+      el.classList.remove('is-open');
+      s.first = null;
+      s.lock = false;
+    }, 680);
+  }
+
+  function gameTabs(active) {
+    return '<div class="game-tabs">' +
+      '<button type="button" data-game-switch="memory" class="' + (active === 'memory' ? 'is-active' : '') + '">Memory</button>' +
+      '<button type="button" data-game-switch="match" class="' + (active === 'match' ? 'is-active' : '') + '">Пары</button>' +
+      '<button type="button" data-game-switch="listen" class="' + (active === 'listen' ? 'is-active' : '') + '">Слушай</button>' +
+    '</div>';
+  }
+
+  function openMatch(modId) {
+    const mod = modId ? SP5.NODES.get(modId) : routeModule();
+    if (!mod) return;
+    const words = gameWords(mod, 6);
+    if (words.length < 3) { SP5.toast('Для игры нужно больше слов'); return; }
+    if (state.game && state.game.timer) clearInterval(state.game.timer);
+    const pairs = words.map((w, i) => ({ key: String(i), en: w[0], ru: w[1] }));
+    state.game = {
+      mode: 'match',
+      mod: mod,
+      pairs: pairs,
+      en: shuffle(pairs.map(p => ({ key: p.key, text: p.en }))),
+      ru: shuffle(pairs.map(p => ({ key: p.key, text: p.ru }))),
+      selectedEn: null,
+      selectedRu: null,
+      matched: 0,
+      moves: 0,
+      left: 120,
+      timer: null
+    };
+    ensureGameModal();
+    renderMatch();
+    openModal(gameModal);
+    state.game.timer = setInterval(() => {
+      if (!state.game) return;
+      state.game.left--;
+      const t = $('#gameTime');
+      if (t) t.textContent = formatTime(state.game.left);
+      if (state.game.left <= 0) endGame(false);
+    }, 1000);
+  }
+
+  function renderMatch() {
+    const s = state.game;
+    if (!s || s.mode !== 'match') return;
+    const body = $('#gameBody');
+    body.innerHTML = '<div class="sp5-head"><div><p class="eyebrow">Пары · 2 минуты</p><h2 id="gameTitle">' + esc(s.mod.title) + '</h2>' +
+      '<p>Выбери слово, затем его перевод. Можно перетащить слово на перевод.</p></div>' +
+      '<button class="icon-btn" type="button" data-close-modal aria-label="Закрыть">' + icon('x') + '</button></div>' +
+      '<div class="sp5-body">' + gameTabs('match') +
+        '<div class="game-bar"><span>Пар: <b id="gamePairs">' + s.matched + '/' + s.pairs.length + '</b></span>' +
+        '<span>Ходы: <b id="gameMoves">' + s.moves + '</b></span>' +
+        '<span>Время: <b id="gameTime">' + formatTime(s.left) + '</b></span></div>' +
+        '<div class="match-cols">' +
+          '<div class="match-col">' + s.en.map(x =>
+            '<button class="match-item" type="button" draggable="true" data-match-en="' + x.key + '" style="--mc:' + s.mod.color + '">' + esc(x.text) + '</button>'
+          ).join('') + '</div>' +
+          '<div class="match-col">' + s.ru.map(x =>
+            '<button class="match-item match-ru" type="button" data-match-ru="' + x.key + '" style="--mc:' + s.mod.color + '">' + esc(x.text) + '</button>'
+          ).join('') + '</div>' +
+        '</div>' +
+        '<p class="sp5-muted" style="margin-top:12px">На телефоне просто нажми слово, затем перевод. На компьютере можно перетащить.</p>' +
+      '</div>';
+  }
+
+  function matchSelect(side, key) {
+    const s = state.game;
+    if (!s || s.mode !== 'match') return;
+    const sel = side === 'en' ? '[data-match-en="' + key + '"]' : '[data-match-ru="' + key + '"]';
+    const el = $(sel);
+    if (!el || el.classList.contains('is-matched')) return;
+    if (side === 'en') {
+      if (s.selectedEn !== null) {
+        const prev = $('[data-match-en="' + s.selectedEn + '"]');
+        if (prev) prev.classList.remove('is-selected');
+      }
+      s.selectedEn = key;
+    } else {
+      if (s.selectedRu !== null) {
+        const prev = $('[data-match-ru="' + s.selectedRu + '"]');
+        if (prev) prev.classList.remove('is-selected');
+      }
+      s.selectedRu = key;
+    }
+    el.classList.add('is-selected');
+    if (s.selectedEn !== null && s.selectedRu !== null) attemptMatch();
+  }
+
+  function attemptMatch() {
+    const s = state.game;
+    if (!s || s.mode !== 'match' || s.selectedEn === null || s.selectedRu === null) return;
+    const enKey = s.selectedEn;
+    const ruKey = s.selectedRu;
+    const enEl = $('[data-match-en="' + enKey + '"]');
+    const ruEl = $('[data-match-ru="' + ruKey + '"]');
+    s.selectedEn = null;
+    s.selectedRu = null;
+    s.moves++;
+    const moves = $('#gameMoves');
+    if (moves) moves.textContent = s.moves;
+    if (enKey === ruKey) {
+      if (enEl) { enEl.classList.remove('is-selected'); enEl.classList.add('is-matched'); }
+      if (ruEl) { ruEl.classList.remove('is-selected'); ruEl.classList.add('is-matched'); }
+      s.matched++;
+      const pairs = $('#gamePairs');
+      if (pairs) pairs.textContent = s.matched + '/' + s.pairs.length;
+      if (s.matched === s.pairs.length) setTimeout(() => endGame(true), 250);
+      return;
+    }
+    if (enEl) { enEl.classList.remove('is-selected'); enEl.classList.add('is-wrong'); }
+    if (ruEl) { ruEl.classList.remove('is-selected'); ruEl.classList.add('is-wrong'); }
+    setTimeout(() => {
+      if (enEl) enEl.classList.remove('is-wrong');
+      if (ruEl) ruEl.classList.remove('is-wrong');
+    }, 520);
+  }
+
+  function openListen(modId) {
+    const mod = modId ? SP5.NODES.get(modId) : routeModule();
+    if (!mod) return;
+    const pool = gameWords(mod, 12);
+    if (pool.length < 3) { SP5.toast('Для игры нужно больше слов'); return; }
+    if (state.game && state.game.timer) clearInterval(state.game.timer);
+    const picked = shuffle(pool).slice(0, 5);
+    const qs = picked.map(w => {
+      const distract = shuffle(pool.filter(x => x[0].toLowerCase() !== String(w[0]).toLowerCase() && x[1] !== w[1])).slice(0, 2);
+      const options = shuffle(Array.from(new Set([w[1]].concat(distract.map(x => x[1])))));
+      return { word: w, options: options, correct: options.indexOf(w[1]) };
+    });
+    state.game = {
+      mode: 'listen',
+      mod: mod,
+      qs: qs,
+      qi: 0,
+      score: 0,
+      answered: false,
+      left: 120,
+      timer: null
+    };
+    ensureGameModal();
+    renderListen();
+    openModal(gameModal);
+    state.game.timer = setInterval(() => {
+      if (!state.game) return;
+      state.game.left--;
+      const t = $('#gameTime');
+      if (t) t.textContent = formatTime(state.game.left);
+      if (state.game.left <= 0) endGame(false);
+    }, 1000);
+    setTimeout(() => { if (state.game && state.game.mode === 'listen') speakListen(); }, 350);
+  }
+
+  function renderListen() {
+    const s = state.game;
+    if (!s || s.mode !== 'listen') return;
+    const q = s.qs[s.qi];
+    if (!q) { endGame(true); return; }
+    const body = $('#gameBody');
+    body.innerHTML = '<div class="sp5-head"><div><p class="eyebrow">Слушай · 2 минуты</p><h2 id="gameTitle">' + esc(s.mod.title) + '</h2>' +
+      '<p>Послушай слово и выбери его перевод.</p></div>' +
+      '<button class="icon-btn" type="button" data-close-modal aria-label="Закрыть">' + icon('x') + '</button></div>' +
+      '<div class="sp5-body">' + gameTabs('listen') +
+        '<div class="game-bar"><span>Вопрос: <b>' + (s.qi + 1) + '/' + s.qs.length + '</b></span>' +
+        '<span>Верно: <b>' + s.score + '</b></span>' +
+        '<span>Время: <b id="gameTime">' + formatTime(s.left) + '</b></span></div>' +
+        '<div class="listen-card">' +
+          '<button class="listen-orb" type="button" data-listen-play aria-label="Прослушать слово">' + icon('volume') + '</button>' +
+          '<p>Нажми на динамик и выбери перевод</p>' +
+        '</div>' +
+        '<div class="test-options">' + q.options.map((o, i) =>
+          '<button class="test-opt" type="button" data-listen-opt="' + i + '">' + esc(o) + '</button>'
+        ).join('') + '</div>' +
+        '<div id="listenFeedback"></div>' +
+        '<div class="test-foot"><span class="test-count">' + (s.qi + 1) + ' / ' + s.qs.length + '</span>' +
+        '<button class="sp5-btn primary" type="button" data-listen-next disabled>Дальше ' + icon('arrow-right') + '</button></div>' +
+      '</div>';
+  }
+
+  function speakListen() {
+    const s = state.game;
+    if (!s || s.mode !== 'listen') return;
+    const q = s.qs[s.qi];
+    if (!q) return;
+    SP5.speak(q.word[0]);
+    const orb = $('[data-listen-play]');
+    if (orb) {
+      orb.classList.add('is-playing');
+      setTimeout(() => orb.classList.remove('is-playing'), 1100);
+    }
+  }
+
+  function answerListen(chosen) {
+    const s = state.game;
+    if (!s || s.mode !== 'listen' || s.answered) return;
+    const q = s.qs[s.qi];
+    if (!q) return;
+    s.answered = true;
+    const opts = $$('[data-listen-opt]', $('#gameBody'));
+    opts.forEach((b, i) => {
+      b.disabled = true;
+      if (i === q.correct) b.classList.add('is-correct');
+    });
+    const ok = chosen === q.correct;
+    if (ok) s.score++;
+    else {
+      if (opts[chosen]) opts[chosen].classList.add('is-wrong');
+      SP5.addMistake(q.word[0], q.word[1], s.mod.title);
+    }
+    const fb = $('#listenFeedback');
+    if (fb) fb.innerHTML = '<div class="test-explain"><b>' + (ok ? 'Верно!' : 'Пока неверно.') + '</b> ' +
+      esc(q.word[0]) + ' — ' + esc(q.word[1]) + '</div>';
+    const next = $('[data-listen-next]');
+    if (next) { next.disabled = false; next.focus(); }
+  }
+
+  function nextListen() {
+    const s = state.game;
+    if (!s || s.mode !== 'listen' || !s.answered) return;
+    s.qi++;
+    s.answered = false;
+    if (s.qi >= s.qs.length) { endGame(true); return; }
+    renderListen();
+    setTimeout(() => { if (state.game && state.game.mode === 'listen') speakListen(); }, 300);
+  }
+
+  function endGame(win) {
+    const s = state.game;
+    if (!s) return;
+    if (s.timer) clearInterval(s.timer);
+    s.timer = null;
+    if (s.mode === 'listen') {
+      if (win && s.score >= Math.ceil(s.qs.length * 0.6)) boom();
+      const pct = Math.round((s.score / s.qs.length) * 100);
+      const body = $('#gameBody');
+      body.innerHTML = '<div class="sp5-head"><div><p class="eyebrow">Слушай · 2 минуты</p><h2 id="gameTitle">' + esc(s.mod.title) + '</h2></div>' +
+        '<button class="icon-btn" type="button" data-close-modal aria-label="Закрыть">' + icon('x') + '</button></div>' +
+        '<div class="sp5-body"><div class="route-done">' +
+          '<div class="big">🎧</div>' +
+          '<h3>' + (win ? (pct >= 60 ? 'Хороший слух!' : 'Есть что потренировать') : 'Время вышло') + '</h3>' +
+          '<p>Правильно <b>' + s.score + ' из ' + s.qs.length + '</b> (' + pct + '%).' +
+          (win ? ' Слова с ошибками вернутся в карточках.' : ' Попробуй ещё раз — слушай первый звук слова.') + '</p>' +
+          '<div class="sp5-actions"><button class="sp5-btn primary" type="button" data-game-again>Ещё раз</button>' +
+          '<button class="sp5-btn" type="button" data-close-modal>Закрыть</button></div>' +
+        '</div></div>';
+      return;
+    }
+    if (win) boom();
+    const label = s.mode === 'match' ? 'Пары' : 'Memory';
+    const body = $('#gameBody');
+    body.innerHTML = '<div class="sp5-head"><div><p class="eyebrow">' + label + '</p><h2 id="gameTitle">' + esc(s.mod.title) + '</h2></div>' +
+      '<button class="icon-btn" type="button" data-close-modal aria-label="Закрыть">' + icon('x') + '</button></div>' +
+      '<div class="sp5-body"><div class="route-done">' +
+        '<div class="big">' + (win ? '🎉' : '⏳') + '</div>' +
+        '<h3>' + (win ? 'Все пары найдены!' : 'Время вышло') + '</h3>' +
+        '<p>' + (win ? 'Ходов: <b>' + s.moves + '</b>. Отличная тренировка памяти.' : 'Попробуй ещё раз — с третьей попытки обычно быстрее.') + '</p>' +
+        '<div class="sp5-actions"><button class="sp5-btn primary" type="button" data-game-again>Ещё раз</button>' +
+        '<button class="sp5-btn" type="button" data-close-modal>Закрыть</button></div>' +
+      '</div></div>';
+  }
+
+  /* ------------------------------------------------------- next-step hero */
+  function ensureNextHero() {
+    const mh = document.querySelector('.mobile-home');
+    if (!mh || $('#nextHero')) return;
+    const hero = document.createElement('section');
+    hero.className = 'mh-next';
+    hero.id = 'nextHero';
+    const anchor = mh.querySelector('.mh-hero');
+    if (anchor) anchor.insertAdjacentElement('afterend', hero);
+    else mh.insertBefore(hero, mh.firstChild);
+  }
+
+  function renderNextHero() {
+    ensureNextHero();
+    const hero = $('#nextHero');
+    if (!hero) return;
+    const last = lastPlace();
+    const mod = routeModule();
+    const st = streakInfo();
+    const title = last ? 'Продолжить: ' + last.title : '5 минут английского';
+    const sub = last ? (last.label || last.module || 'Твоя тема') : 'Слова, правило и 3 задания';
+    hero.innerHTML =
+      '<span class="mh-next-kicker">' + esc(streakLabel(st)) + '</span>' +
+      '<h2>' + esc(title) + '</h2>' +
+      '<p>' + esc(sub) + '</p>' +
+      '<div class="mh-next-actions">' +
+        '<button class="mh-next-primary" type="button" data-next-continue>' + (last ? 'Продолжить' : 'Начать 5 минут') + '</button>' +
+        '<button class="mh-next-secondary" type="button" data-next-route>' + (last ? 'Маршрут 5 минут' : 'Открыть карту') + '</button>' +
+      '</div>';
+    $('[data-next-continue]', hero).addEventListener('click', () => {
+      if (last) SP5.openLeaf(last.id, { scroll: last.scroll });
+      else openRoute();
+    });
+    $('[data-next-route]', hero).addEventListener('click', () => {
+      if (last) openRoute();
+      else { const h = document.querySelector('#brandHome'); if (h) h.click(); }
+    });
+  }
+
   /* --------------------------------------------------------------- PWA */
   function installApp() {
     if (!deferredPrompt) { SP5.toast('Установка недоступна в этом браузере'); return; }
@@ -800,6 +1560,15 @@
   function addTools() {
     const top = document.querySelector('.top-actions');
     if (top) {
+      const route = document.createElement('button');
+      route.className = 'route-top';
+      route.id = 'routeTopBtn';
+      route.type = 'button';
+      route.title = '5-минутный маршрут';
+      route.innerHTML = icon('sparkles') + '<span>5 минут</span>';
+      route.addEventListener('click', openRoute);
+      top.insertBefore(route, top.firstChild);
+
       const b = document.createElement('button');
       b.className = 'icon-btn top-reading';
       b.id = 'readingTopBtn';
@@ -812,6 +1581,19 @@
     }
     const dock = document.querySelector('.dock');
     if (dock) {
+      const route = document.createElement('button');
+      route.className = 'dock-home route-dock';
+      route.id = 'routeDockBtn';
+      route.type = 'button';
+      route.title = '5-минутный маршрут';
+      route.setAttribute('aria-label', '5-минутный маршрут');
+      route.innerHTML = icon('sparkles');
+      route.addEventListener('click', e => { e.stopPropagation(); openRoute(); });
+      dock.insertBefore(route, dock.firstChild);
+      const rsep = document.createElement('span');
+      rsep.className = 'dock-sep';
+      dock.insertBefore(rsep, route.nextSibling);
+
       const b = document.createElement('button');
       b.className = 'dock-home';
       b.id = 'readingDockBtn';
@@ -832,12 +1614,14 @@
       tools.id = 'mhTools';
       tools.innerHTML =
         '<button type="button" data-mh-reading><span>' + icon('book') + '</span><b>Тексты</b><i>12 текстов</i></button>' +
-        '<button type="button" data-mh-dash><span>' + icon('chart') + '</span><b>Прогресс</b><i>тесты и настройки</i></button>';
+        '<button type="button" data-mh-dash><span>' + icon('chart') + '</span><b>Прогресс</b><i>тесты</i></button>' +
+        '<button type="button" data-mh-game><span>' + icon('grid') + '</span><b>Игра</b><i>2 минуты</i></button>';
       const hero = mh.querySelector('.mh-hero');
       if (hero && hero.nextSibling) mh.insertBefore(tools, hero.nextSibling);
       else mh.insertBefore(tools, mh.firstChild);
       $('[data-mh-reading]', tools).addEventListener('click', openReading);
       $('[data-mh-dash]', tools).addEventListener('click', openDashboard);
+      $('[data-mh-game]', tools).addEventListener('click', () => openGame());
     }
   }
 
@@ -852,6 +1636,8 @@
   if (/[?&]still=1/.test(location.search)) document.documentElement.dataset.still = '1';
   applyPrefs();
   addTools();
+  renderNextHero();
+  document.addEventListener('sp5:last', renderNextHero);
   registerSW();
   setTimeout(showWelcome, 1100);
 
@@ -872,6 +1658,12 @@
     if (params.get('dash') === '1') openDashboard();
     if (params.get('test')) openTest(params.get('test'));
     if (params.get('welcome') === '1') openModal(welcomeModal);
+    if (params.get('route') === '1') openRoute();
+    if (params.get('game') === '1') openGame();
+    if (params.get('continue') === '1') {
+      const last = lastPlace();
+      if (last) SP5.openLeaf(last.id, { scroll: last.scroll });
+    }
   }, 450);
 
   window.SP5UI = {

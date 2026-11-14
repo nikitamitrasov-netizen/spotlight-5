@@ -1,5 +1,5 @@
-/* Spotlight 5 — offline cache */
-const CACHE = 'sp5-v9';
+﻿/* Spotlight 5 — offline cache */
+const CACHE = 'sp5-v14';
 const ASSETS = [
   './',
   'index.html',
@@ -60,3 +60,4 @@ self.addEventListener('fetch', event => {
     })
   );
 });
+
