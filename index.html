@@ -98,6 +98,11 @@
 
 <nav class="crumbs" id="crumbs" aria-label="Хлебные крошки"></nav>
 
+<nav class="lesson-rail" id="lessonRail" aria-label="Уроки модуля" hidden>
+  <span class="lr-kicker" id="lessonRailKicker">Уроки</span>
+  <div class="lr-scroll" id="lessonRailScroll"></div>
+</nav>
+
 <main id="stage" aria-label="Интерактивная карта знаний">
   <div id="world">
     <svg id="links" aria-hidden="true" width="12000" height="12000" viewBox="-6000 -6000 12000 12000">
@@ -124,7 +129,7 @@
   <div class="mh-hero">
     <p class="eyebrow">Английский язык · 5 класс</p>
     <h1>SPOTLIGHT <span>5</span></h1>
-    <p class="mh-sub"><b>12</b> разделов · <b>121</b> тема</p>
+    <p class="mh-sub"><b>12</b> разделов · <b>74</b> урока · <b>121</b> тема</p>
     <div class="mh-progress"><i id="mhProgress"></i></div>
   </div>
   <div class="mh-grid" id="mhGrid"></div>
@@ -163,6 +168,7 @@
     <div class="help-tips">
       <p><b>Горячие клавиши:</b> <kbd>/</kbd> — поиск, <kbd>Esc</kbd> — назад, <kbd>+</kbd> / <kbd>−</kbd> — масштаб.</p>
       <p><b>Навигация:</b> карту можно тянуть мышью или пальцем, колесо мыши — масштаб. Кнопка «В начало» возвращает к обзору.</p>
+      <p><b>Уроки:</b> внутри модуля сверху появляется полоса <b>1a–1f</b>. Открой урок, изучи темы и пройди автопроверку: правильный ответ подсветится сразу.</p>
       <p class="muted">Карта составлена по модулям УМК «Английский в фокусе. Spotlight 5» (Ваулина, Дули, Подоляко, Эванс). Порядок тем соответствует учебнику, формулировки адаптированы для самостоятельного повторения.</p>
     </div>
   </div>
@@ -175,6 +181,12 @@
 <script src="js/data-3.js"></script>
 <script src="js/data-reading.js"></script>
 <script src="js/data-theory.js"></script>
+<script src="js/data-lessons.js"></script>
+<script src="js/data-lesson-texts.js"></script>
+<script src="js/data-lesson-texts-2.js"></script>
+<script src="js/data-lesson-texts-3.js"></script>
+<script src="js/data-lesson-texts-4.js"></script>
+<script src="js/data-lesson-texts-5.js"></script>
 <script src="js/extras-1.js"></script>
 <script src="js/extras-2.js"></script>
 <script src="js/extras-3.js"></script>

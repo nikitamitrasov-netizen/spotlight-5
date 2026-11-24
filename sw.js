@@ -1,5 +1,5 @@
-﻿/* Spotlight 5 — offline cache */
-const CACHE = 'sp5-v15';
+/* Spotlight 5 — offline cache */
+const CACHE = 'sp5-v28';
 const ASSETS = [
   './',
   'index.html',
@@ -10,6 +10,12 @@ const ASSETS = [
   'js/data-3.js',
   'js/data-reading.js',
   'js/data-theory.js',
+  'js/data-lessons.js',
+  'js/data-lesson-texts.js',
+  'js/data-lesson-texts-2.js',
+  'js/data-lesson-texts-3.js',
+  'js/data-lesson-texts-4.js',
+  'js/data-lesson-texts-5.js',
   'js/extras-1.js',
   'js/extras-2.js',
   'js/extras-3.js',

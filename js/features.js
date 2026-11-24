@@ -281,6 +281,25 @@
         ).join('') + '</div>'
       : '<div class="dash-empty">Ошибок нет. Это хороший знак — но тесты стоит пройти, чтобы проверить себя.</div>';
 
+    const writings = SP5.readWritings ? Object.values(SP5.readWritings()) : [];
+    const writingBlock = writings.length
+      ? '<div class="writing-list">' + writings
+          .sort((a, b) => new Date(b.updated) - new Date(a.updated))
+          .map(w => {
+            const words = String(w.text || '').trim() ? String(w.text).trim().split(/\s+/).length : 0;
+            const excerpt = String(w.text || '').replace(/\s+/g, ' ').trim();
+            return '<div class="writing-row">' +
+              '<div class="writing-meta"><b>' + esc(w.code) + ' · ' + esc(w.title) + '</b>' +
+                '<span>' + esc(w.module) + ' · ' + dateLabel(w.updated) + ' · ' + words + ' сл.</span></div>' +
+              '<div class="writing-excerpt">' + esc(excerpt.length > 220 ? excerpt.slice(0, 220) + '…' : excerpt) + '</div>' +
+              '<div class="writing-actions">' +
+                '<button class="sp5-btn" type="button" data-open-writing data-mod-id="' + esc(w.modId) + '" data-code="' + esc(w.code) + '">Открыть урок</button>' +
+                '<button class="sp5-btn danger" type="button" data-delete-writing data-key="' + esc(w.key) + '">Удалить</button>' +
+              '</div>' +
+            '</div>';
+          }).join('') + '</div>'
+      : '<div class="dash-empty">Мини-писем пока нет. Открой любой урок, напиши 3–4 предложения — черновик сохранится в этом браузере.</div>';
+
     body.innerHTML =
       '<div class="dash-stats">' +
         '<div class="dash-stat" style="--mc:var(--accent)"><b>' + pct + '%</b><span>изучено тем</span></div>' +
@@ -291,6 +310,7 @@
       '<div class="dash-section"><h3>По модулям</h3><span class="sp5-muted">' + done + ' из ' + total + ' тем</span></div>' +
       '<div class="dash-rows">' + rows + '</div>' +
       '<div class="dash-section"><h3>Последние тесты</h3></div>' + testBlock +
+      '<div class="dash-section"><h3>Мини-письма</h3><span class="sp5-muted">' + writings.length + ' работ</span></div>' + writingBlock +
       '<div class="dash-section"><h3>Слова, где были ошибки</h3></div>' + mistakeBlock +
       '<div class="dash-section"><h3>Настройки</h3></div>' +
       '<div class="dash-settings">' +
@@ -335,6 +355,18 @@
       if (!mod) return;
       closeModal(dashModal);
       SP5.openCards(mod.id);
+    }));
+    $$('[data-open-writing]', body).forEach(b => b.addEventListener('click', () => {
+      if (!SP5.openLesson) return;
+      closeModal(dashModal);
+      SP5.openLesson(b.dataset.modId, b.dataset.code);
+    }));
+    $$('[data-delete-writing]', body).forEach(b => b.addEventListener('click', () => {
+      if (!SP5.deleteWriting) return;
+      if (!window.confirm('Удалить этот черновик?')) return;
+      SP5.deleteWriting(b.dataset.key);
+      SP5.toast('Черновик удалён');
+      renderDashboard();
     }));
     const testBtn = $('[data-open-dash-test]', body);
     if (testBtn) testBtn.addEventListener('click', () => {

@@ -31,6 +31,8 @@
   const state = {
     focusId: null,
     panelLeafId: null,
+    panelLesson: null,
+    lessonCode: null,
     panelOpen: false,
     cardsOpen: false,
     progress: new Set(STORE.get('sp5.progress', [])),
@@ -42,6 +44,8 @@
   };
 
   const NODES = new Map();
+  const LESSONS = new Map();
+  const WRITINGS_KEY = 'sp5.writings';
   let ROOT = null;
   let MODULES = [];
   let TOTAL_LEAVES = 0;
@@ -131,6 +135,28 @@
     });
   }
 
+  function buildLessons() {
+    const source = window.SPOTLIGHT_LESSONS || {};
+    const textSource = window.SPOTLIGHT_LESSON_TEXTS || {};
+    MODULES.forEach(mod => {
+      const defs = source[mod.data.title] || [];
+      const texts = textSource[mod.data.title] || {};
+      const all = moduleLeaves(mod);
+      const list = defs.map(def => {
+        const leaves = (def.topics || [])
+          .map(title => all.find(lf => lf.title === title))
+          .filter(Boolean);
+        const readingLeaf = def.reading ? all.find(lf => lf.title === def.reading) || null : null;
+        return Object.assign({}, def, {
+          leaves: leaves,
+          readingLeaf: readingLeaf,
+          text: texts[def.code] || null
+        });
+      }).filter(def => def.leaves.length || def.readingLeaf || def.test || def.text);
+      if (list.length) LESSONS.set(mod.id, list);
+    });
+  }
+
   function buildTree() {
     ROOT = addNode({
       id: 'root', type: 'root', title: 'Spotlight 5', ru: 'Английский язык · 5 класс',
@@ -215,7 +241,9 @@
 
   function updateRootMeta() {
     const meta = $('#rootMeta');
-    if (meta) meta.innerHTML = '<b>' + MODULES.length + '</b> разделов · <b>' + TOTAL_LEAVES + '</b> тем';
+    if (meta) meta.innerHTML = '<b>' + MODULES.length + '</b> разделов · <b>' + totalLessons() + '</b> уроков · <b>' + TOTAL_LEAVES + '</b> тем';
+    const sub = $('.mh-sub');
+    if (sub) sub.innerHTML = '<b>' + MODULES.length + '</b> разделов · <b>' + totalLessons() + '</b> уроков · <b>' + TOTAL_LEAVES + '</b> тем';
   }
 
   function mountNode(n) {
@@ -230,17 +258,19 @@
     applyColor(el, n.color);
 
     if (n.type === 'module') {
+      const lessonCount = (LESSONS.get(n.id) || []).length;
       el.innerHTML =
         '<span class="node-card">' +
           '<span class="node-icon">' + n.icon + '</span>' +
           '<span class="node-copy">' +
             '<span class="node-title">' + esc(n.title) + '</span>' +
             '<span class="node-ru">' + esc(n.ru) + '</span>' +
+            (lessonCount ? '<span class="node-lessons">' + lessonCount + ' уроков</span>' : '') +
           '</span>' +
           '<span class="node-count">' + n.count + '</span>' +
           '<span class="node-progress" style="--p:0%"></span>' +
         '</span>';
-      el.setAttribute('aria-label', n.label + ': ' + n.title + ' — ' + n.ru + ', тем: ' + n.count);
+      el.setAttribute('aria-label', n.label + ': ' + n.title + ' — ' + n.ru + ', уроков: ' + lessonCount + ', тем: ' + n.count);
     } else if (n.type === 'branch') {
       const preview = n.children.length ? n.children[0].title : '';
       el.innerHTML =
@@ -324,9 +354,9 @@
   function overviewRadii() {
     const vw = stage.clientWidth || window.innerWidth;
     const vh = stage.clientHeight || window.innerHeight;
-    const ry = clamp(vh * 0.37, 245, 385);
-    let rx = clamp(vw * 0.40, 400, 660);
-    rx = Math.max(rx, ry * 1.28);
+    const ry = clamp(vh * 0.40, 270, 420);
+    let rx = clamp(vw * 0.42, 450, 720);
+    rx = Math.max(rx, ry * 1.25);
     return { rx: rx, ry: ry };
   }
 
@@ -374,7 +404,10 @@
     if (focus.type === 'root') {
       const r = overviewRadii();
       const pts = ellipseRing(kids.length, r.rx, r.ry);
-      kids.forEach((c, i) => result.set(c.id, { x: pts[i].x, y: pts[i].y, s: 1 }));
+      kids.forEach((c, i) => {
+        const f = i % 2 ? 0.80 : 1.02;
+        result.set(c.id, { x: pts[i].x * f, y: pts[i].y * f, s: 1 });
+      });
     } else {
       const R = focus.type === 'module' ? 300 : 280;
       const n = kids.length;
@@ -497,13 +530,15 @@
     const vw = window.innerWidth, vh = window.innerHeight;
     const mobile = vw < 820;
     const panelW = state.panelOpen && vw > 820 ? 492 : 0;
+    const rail = $('#lessonRail');
+    const railH = rail && !rail.hidden ? rail.offsetHeight + 10 : 0;
     const availW = Math.max(160, vw - panelW - (mobile ? 40 : 150));
-    const availH = Math.max(160, vh - (mobile ? 170 : 205));
+    const availH = Math.max(160, vh - (mobile ? 170 : 205) - railH);
     let s = Math.min(availW / (maxX - minX), availH / (maxY - minY));
     s = clamp(s, mobile ? (state.panelOpen ? .55 : .5) : .42, 1.3);
 
     const screenX = (vw - panelW) / 2;
-    const screenY = (vh + (mobile ? 44 : 70)) / 2;
+    const screenY = (vh + (mobile ? 44 : 70) + railH) / 2;
     const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
     const target = { x: screenX - cx * s, y: screenY - cy * s, s: s };
     tweenCam(target, dur == null ? 800 : dur);
@@ -580,6 +615,7 @@
     updateCrumbs();
     updateDock();
     updateHint();
+    updateLessonRail();
     requestAnimationFrame(() => fitCamera(reduced ? 0 : 850));
     startLoop();
   }
@@ -650,7 +686,7 @@
     const grid = $('#mhGrid');
     if (!grid) return;
     const sub = $('.mh-sub');
-    if (sub) sub.innerHTML = '<b>' + MODULES.length + '</b> разделов · <b>' + TOTAL_LEAVES + '</b> тем';
+    if (sub) sub.innerHTML = '<b>' + MODULES.length + '</b> разделов · <b>' + totalLessons() + '</b> уроков · <b>' + TOTAL_LEAVES + '</b> тем';
     grid.innerHTML = '';
     MODULES.forEach(m => {
       const b = document.createElement('button');
@@ -726,6 +762,438 @@
   }
 
   /* =====================================================================
+     Textbook lessons: 1a–1f + Progress Check
+     ===================================================================== */
+  function lessonKey(mod, lesson) {
+    return 'lesson:' + mod.data.title + '|' + lesson.code;
+  }
+
+  function readWritings() {
+    const value = STORE.get(WRITINGS_KEY, {});
+    return value && typeof value === 'object' ? value : {};
+  }
+
+  function writeWritings(value) {
+    STORE.set(WRITINGS_KEY, value);
+  }
+
+  function deleteWriting(key) {
+    const all = readWritings();
+    delete all[key];
+    writeWritings(all);
+  }
+
+  function wordsLabel(n) {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    const word = mod10 === 1 && mod100 !== 11 ? 'слово'
+      : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? 'слова' : 'слов';
+    return n + ' ' + word;
+  }
+
+  function totalLessons() {
+    let n = 0;
+    LESSONS.forEach(list => { n += list.length; });
+    return n;
+  }
+
+  function updateLessonRail() {
+    const rail = $('#lessonRail');
+    const scroll = $('#lessonRailScroll');
+    if (!rail || !scroll) return;
+    const focus = state.focusId ? NODES.get(state.focusId) : null;
+    const mod = focus ? (focus.type === 'module' ? focus : focus.moduleNode) : null;
+    const list = mod ? LESSONS.get(mod.id) : null;
+    if (!list || !list.length) {
+      rail.hidden = true;
+      rail.style.removeProperty('--mc');
+      scroll.innerHTML = '';
+      return;
+    }
+    rail.hidden = false;
+    rail.style.setProperty('--mc', mod.color);
+    applyColor(rail, mod.color);
+    const kicker = $('#lessonRailKicker');
+    if (kicker) kicker.textContent = 'Уроки · ' + mod.badge;
+    scroll.innerHTML = list.map(lesson => {
+      const done = state.progress.has(lessonKey(mod, lesson));
+      const active = state.lessonCode === lesson.code;
+      return '<button class="lesson-chip is-' + esc(lesson.kind || 'core') +
+        (done ? ' is-done' : '') + (active ? ' is-active' : '') +
+        '" type="button" data-lesson="' + esc(lesson.code) + '"' +
+        ' aria-label="' + esc(lesson.code + ' ' + lesson.title + ' — ' + lesson.ru) + '"' +
+        ' aria-pressed="' + (active ? 'true' : 'false') + '">' +
+        '<span class="lc-code">' + esc(lesson.code) + '</span>' +
+        '<span class="lc-title">' + esc(lesson.code === 'PC' ? 'Тест' : lesson.title) + '</span>' +
+        '</button>';
+    }).join('');
+  }
+
+  function stripTags(text) {
+    return String(text || '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/\s+([.,!?;:])/g, '$1')
+      .trim();
+  }
+
+  function escapeRegExp(text) {
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function splitSentences(text) {
+    const out = [];
+    let start = 0;
+    const re = /[.!?]\s+(?=[A-ZА-ЯЁ«"“])/g;
+    let match;
+    while ((match = re.exec(text))) {
+      out.push(text.slice(start, match.index + 1).trim());
+      start = match.index + 1;
+    }
+    out.push(text.slice(start).trim());
+    return out.filter(Boolean);
+  }
+
+  function makeGapTasks(lesson) {
+    if (!lesson.text) return null;
+    const sentences = splitSentences(stripTags((lesson.text.paragraphs || []).join(' ')));
+    const items = [];
+    const seen = new Set();
+    for (const pair of lesson.text.glossary || []) {
+      const word = String(pair[0]);
+      const key = word.toLowerCase();
+      if (seen.has(key)) continue;
+      const re = new RegExp('\\b' + escapeRegExp(word) + '\\b', 'i');
+      const found = sentences.find(s => re.test(s));
+      if (!found) continue;
+      seen.add(key);
+      items.push({
+        q: esc(found.replace(re, '______')),
+        answer: word,
+        hint: pair[1]
+      });
+      if (items.length >= 3) break;
+    }
+    if (items.length < 2) return null;
+    return {
+      type: 'gap',
+      title: 'Вставь слово',
+      intro: 'Вспомни слово из текста и впиши его в пропуск. Проверка покажет, верно ли ты восстановил предложение.',
+      items: items
+    };
+  }
+
+  function makeLessonWriting(lesson, mod) {
+    if (!lesson.text) return null;
+    const words = (lesson.text.glossary || []).slice(0, 3).map(g => g[0]);
+    const key = mod.data.title + '|' + lesson.code;
+    const saved = readWritings()[key];
+    return {
+      type: 'write',
+      title: 'Мини-письмо',
+      prompt: 'Напиши 3–4 предложения по теме «' + (lesson.focus || lesson.title) + '». Используй слова: ' + words.join(', ') + '.',
+      model: (lesson.text.paragraphs || []).slice(0, 2).join(' '),
+      draft: saved && saved.text ? saved.text : '',
+      writeKey: key,
+      modId: mod.id,
+      module: mod.label + ' · ' + mod.title,
+      lessonCode: lesson.code,
+      lessonTitle: lesson.title
+    };
+  }
+
+  function makeLessonQuiz(lesson, mod) {
+    const seen = new Set();
+    const own = [];
+    lesson.leaves.forEach(lf => {
+      (lf.data.blocks || []).forEach(b => {
+        if (b.type === 'words') {
+          (b.items || []).forEach(it => {
+            const key = String(it[0]).toLowerCase();
+            if (!seen.has(key)) { seen.add(key); own.push(it); }
+          });
+        }
+      });
+    });
+    if (lesson.readingLeaf) {
+      (lesson.readingLeaf.data.blocks || []).forEach(b => {
+        if (b.type === 'text' && b.glossary) {
+          b.glossary.forEach(it => {
+            const key = String(it[0]).toLowerCase();
+            if (!seen.has(key)) { seen.add(key); own.push(it); }
+          });
+        }
+      });
+    }
+    const examples = [];
+    const exSeen = new Set();
+    lesson.leaves.forEach(lf => {
+      (lf.data.blocks || []).forEach(b => {
+        if (b.type === 'rule') {
+          (b.items || []).forEach(r => {
+            (r.examples || []).forEach(ex => {
+              const key = String(ex[0]).toLowerCase();
+              if (!exSeen.has(key)) { exSeen.add(key); examples.push(ex); }
+            });
+          });
+        }
+        if (b.type === 'phrase') {
+          (b.items || []).forEach(ex => {
+            const key = String(ex[0]).toLowerCase();
+            if (!exSeen.has(key)) { exSeen.add(key); examples.push(ex); }
+          });
+        }
+      });
+    });
+    const pool = moduleWords(mod).concat(examples);
+    const optionPool = own.length >= 3 ? pool : (examples.length >= 3 ? examples : pool);
+    const source = own.length >= 3 ? own : (examples.length >= 3 ? examples : pool);
+    const picked = [];
+    const used = new Set();
+    for (const w of source) {
+      const k = String(w[0]).toLowerCase();
+      if (used.has(k)) continue;
+      used.add(k);
+      picked.push(w);
+      if (picked.length >= 5) break;
+    }
+    if (picked.length < 3) return null;
+    const items = picked.map((w, i) => {
+      const correct = String(w[1]);
+      const variants = [];
+      const vSeen = new Set([correct]);
+      for (const cand of optionPool) {
+        const ru = String(cand[1]);
+        if (vSeen.has(ru)) continue;
+        vSeen.add(ru);
+        variants.push(ru);
+        if (variants.length >= 8) break;
+      }
+      if (variants.length < 2) return null;
+      const options = [correct];
+      let cursor = (lesson.code.charCodeAt(0) + i * 3) % variants.length;
+      while (options.length < 3 && options.length <= variants.length) {
+        const ru = variants[cursor % variants.length];
+        cursor++;
+        if (!options.includes(ru)) options.push(ru);
+      }
+      if (options.length < 3) return null;
+      const shift = (lesson.code.charCodeAt(lesson.code.length - 1) + i) % 3;
+      const shuffled = options.slice(shift).concat(options.slice(0, shift));
+      return {
+        q: 'Что означает «' + esc(w[0]) + '»?',
+        options: shuffled,
+        correct: shuffled.indexOf(correct),
+        explain: '<b>' + esc(w[0]) + '</b> — ' + esc(correct)
+      };
+    }).filter(Boolean);
+
+    if (items.length < 3) return null;
+    return {
+      type: 'choice',
+      title: 'Автопроверка',
+      intro: 'Выбери правильный вариант. Ошибка сразу подсветится — вернись к теме и повтори правило или слово.',
+      items: items
+    };
+  }
+
+  function makeMistakeTasks(lesson) {
+    const mistakes = [];
+    lesson.leaves.forEach(lf => {
+      (lf.data.blocks || []).forEach(b => {
+        if (b.type === 'mistake' && b.wrong && b.right && mistakes.length < 2) {
+          mistakes.push({
+            q: 'Какой вариант правильный?',
+            options: [b.wrong, b.right],
+            correct: 1,
+            explain: b.note || ('Правильно: ' + b.right)
+          });
+        }
+      });
+    });
+    if (!mistakes.length) return null;
+    return {
+      type: 'choice',
+      title: 'Найди ошибку',
+      intro: 'В одном из вариантов есть типичная ошибка. Выбери правильный вариант и проверь себя.',
+      items: mistakes
+    };
+  }
+
+  function lessonTextHtml(text, mod) {
+    const plain = String((text.paragraphs || []).join(' ')).replace(/<[^>]+>/g, ' ');
+    const words = plain.split(/\s+/).filter(Boolean).length;
+    const ps = (text.paragraphs || []).map(p => '<p>' + p + '</p>').join('');
+    const gloss = (text.glossary || []).map(g =>
+      '<button class="gloss" type="button" data-say="' + attr(g[0]) + '"><b>' + esc(g[0]) + '</b><span>' + esc(g[1]) + '</span>' + icon('volume') + '</button>').join('');
+    return '<section class="block reading lesson-text">' +
+      '<div class="reading-cover" style="--mc:' + mod.color + '">' +
+        '<span class="rc-cover-kicker">Text · ' + esc(text.level || 'A1') + '</span>' +
+        '<span class="rc-cover-title">' + esc(text.title || 'Текст урока') + '</span>' +
+        '<span class="rc-cover-meta">' + words + ' слов · 5 класс</span>' +
+      '</div>' +
+      '<div class="reading-tools">' +
+        '<button class="read-aloud" type="button" data-read-aloud>' + icon('volume') + '<span>Прослушать текст</span></button>' +
+        '<button class="read-aloud" type="button" data-reading-mode>' + icon('book') + '<span>Режим чтения</span></button>' +
+      '</div>' +
+      ps +
+      (gloss ? '<div class="glossary">' + gloss + '</div>' : '') +
+    '</section>';
+  }
+
+  function renderLessonPanel(mod, lesson) {
+    const done = state.progress.has(lessonKey(mod, lesson));
+    panel.style.setProperty('--mc', mod.color);
+    panel.style.setProperty('--mc-08', tint(mod.color, .08));
+    panel.style.setProperty('--mc-12', tint(mod.color, .12));
+    panel.style.setProperty('--mc-18', tint(mod.color, .18));
+    panel.style.setProperty('--mc-35', tint(mod.color, .35));
+    panel.style.setProperty('--mc-45', tint(mod.color, .45));
+    panel.style.setProperty('--mc-55', tint(mod.color, .55));
+
+    const topics = lesson.leaves.length;
+    const topicLabel = topics
+      ? topics + ' ' + (topics === 1 ? 'тема' : 'темы')
+      : (lesson.test ? 'итоговый тест' : 'чтение');
+    const meta = [
+      '<span class="panel-chip" style="--mc:' + mod.color + '"><span class="dot"></span>' + esc(lesson.code) + '</span>',
+      '<span class="panel-chip">' + topicLabel + '</span>',
+      (lesson.text || lesson.readingLeaf) ? '<span class="panel-chip">текст + задания</span>' : '',
+      '<span class="panel-chip">автопроверка</span>',
+      '<span class="panel-chip ' + (done ? 'is-good' : '') + '" data-lesson-chip>' + (done ? 'Изучено' : 'Не изучено') + '</span>'
+    ].filter(Boolean).join('');
+
+    panelHead.innerHTML =
+      '<div class="panel-crumb" style="--mc:' + mod.color + '"><span class="dot"></span>' + esc(mod.label) + ' · ' + esc(mod.title) + '</div>' +
+      '<h2 class="panel-title" id="panelTitle">' + esc(lesson.code) + ' · ' + esc(lesson.title) + '</h2>' +
+      '<p class="panel-ru">' + esc(lesson.ru) + '</p>' +
+      '<div class="panel-meta">' + meta + '</div>' +
+      '<button class="icon-btn panel-close" type="button" data-close-panel aria-label="Закрыть урок">' + icon('x') + '</button>';
+
+    const topicCards = lesson.leaves.map(lf =>
+      '<button class="lesson-topic" type="button" data-open-topic="' + lf.id + '">' +
+        '<span class="lt-code">' + esc((lf.branchNode && lf.branchNode.title) || 'Тема') + '</span>' +
+        '<span class="lt-title">' + esc(lf.title) + '</span>' +
+        '<span class="lt-ru">' + esc(lf.ru) + '</span>' +
+        '<span class="lt-arrow">' + icon('arrow-right') + '</span>' +
+      '</button>').join('');
+
+    const readingCard = lesson.readingLeaf
+      ? '<button class="lesson-topic lesson-reading" type="button" data-open-topic="' + lesson.readingLeaf.id + '">' +
+          '<span class="lt-code">Reading & writing</span>' +
+          '<span class="lt-title">' + esc(lesson.readingLeaf.title) + '</span>' +
+          '<span class="lt-ru">' + esc(lesson.readingLeaf.ru) + '</span>' +
+          '<span class="lt-arrow">' + icon('book') + '</span>' +
+        '</button>'
+      : '';
+
+    const quiz = makeLessonQuiz(lesson, mod);
+    const mistakes = makeMistakeTasks(lesson);
+    const gap = makeGapTasks(lesson);
+    const writing = makeLessonWriting(lesson, mod);
+    const textQuiz = lesson.text && (lesson.text.choices || []).length
+      ? renderBlocks([{
+          type: 'choice',
+          title: 'Понял ли ты текст?',
+          intro: 'Прочитай текст ещё раз, если нужно, и выбери правильный вариант.',
+          items: lesson.text.choices
+        }], mod, null)
+      : '';
+    panelBody.innerHTML =
+      '<p class="lead">' + esc(lesson.focus || '') + '</p>' +
+      '<section class="block lesson-topic-block">' +
+        '<h3 class="block-title">Что изучить</h3>' +
+        '<div class="lesson-topic-grid">' + topicCards + '</div>' +
+        (readingCard ? '<div class="lesson-topic-grid">' + readingCard + '</div>' : '') +
+      '</section>' +
+      (lesson.text ? lessonTextHtml(lesson.text, mod) : '') +
+      textQuiz +
+      (gap ? renderBlocks([gap], mod, null) : '') +
+      (mistakes ? renderBlocks([mistakes], mod, null) : '') +
+      (quiz ? renderBlocks([quiz], mod, null) : '') +
+      (writing ? renderBlocks([writing], mod, null) : '') +
+      '<div class="tip"><span class="tip-ico">💡</span><div>Сначала прочитай текст урока и открой темы, затем пройди проверку. Если ошибся — вернись к тексту или правилу, а не просто запоминай ответ.</div></div>';
+
+    renderLessonFoot(mod, lesson);
+  }
+
+  function renderLessonFoot(mod, lesson) {
+    const list = LESSONS.get(mod.id) || [];
+    const idx = list.findIndex(x => x.code === lesson.code);
+    const done = state.progress.has(lessonKey(mod, lesson));
+    panelFoot.innerHTML =
+      '<button class="study-btn ' + (done ? 'is-done' : '') + '" type="button" data-lesson-study>' +
+        icon('check') + '<span>' + (done ? 'Урок изучен' : 'Отметить урок') + '</span>' +
+      '</button>' +
+      '<button class="foot-btn" type="button" data-lesson-test title="Тест по модулю" aria-label="Тест по модулю">' + icon('target') + '</button>' +
+      '<span class="foot-count">' + (idx + 1) + ' / ' + list.length + '</span>' +
+      '<button class="foot-btn" type="button" data-lesson-prev title="Предыдущий урок" aria-label="Предыдущий урок"' + (idx <= 0 ? ' disabled' : '') + '>' + icon('arrow-left') + '</button>' +
+      '<button class="foot-btn" type="button" data-lesson-next title="Следующий урок" aria-label="Следующий урок"' + (idx >= list.length - 1 ? ' disabled' : '') + '>' + icon('arrow-right') + '</button>';
+  }
+
+  function openLesson(modId, code) {
+    const mod = NODES.get(modId);
+    const list = mod ? LESSONS.get(mod.id) : null;
+    const lesson = list ? list.find(x => x.code === code) : null;
+    if (!mod || !lesson) return;
+    state.lessonCode = code;
+    if (state.focusId !== mod.id) applyFocus(mod.id, { keepPanel: true });
+    state.panelOpen = true;
+    state.panelLesson = { modId: mod.id, code: code };
+    state.panelLeafId = null;
+    renderLessonPanel(mod, lesson);
+    panel.classList.add('is-open');
+    panel.setAttribute('aria-hidden', 'false');
+    if (window.innerWidth <= 820) scrim.classList.add('is-visible');
+    NODES.forEach(n => n.el.classList.remove('is-active'));
+    mod.el.classList.add('is-active');
+    updateLessonRail();
+    fitCamera(620);
+    startLoop();
+  }
+
+  function normalizeAnswer(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/[’']/g, "'")
+      .replace(/[.,!?;:()"]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function checkGap(button) {
+    const item = button.closest('.gap-item');
+    if (!item) return;
+    const input = item.querySelector('.gap-input');
+    const result = item.querySelector('.gap-result');
+    const answer = item.dataset.answer || '';
+    const hint = item.dataset.hint || '';
+    if (!input || !result) return;
+    const ok = normalizeAnswer(input.value) === normalizeAnswer(answer);
+    item.classList.toggle('is-correct', ok);
+    item.classList.toggle('is-wrong', !ok);
+    result.hidden = false;
+    result.className = 'gap-result ' + (ok ? 'ok' : 'no');
+    result.innerHTML = ok
+      ? 'Верно!'
+      : 'Не совсем. Правильно: <b>' + esc(answer) + '</b>' + (hint ? ' — ' + esc(hint) : '');
+    input.disabled = true;
+    button.disabled = true;
+  }
+
+  function toggleLessonStudied(mod, lesson) {
+    const key = lessonKey(mod, lesson);
+    if (state.progress.has(key)) state.progress.delete(key);
+    else state.progress.add(key);
+    STORE.set('sp5.progress', Array.from(state.progress));
+    const y = panelBody.scrollTop;
+    renderLessonPanel(mod, lesson);
+    panelBody.scrollTop = y;
+    updateLessonRail();
+    updateProgress();
+  }
+
+  /* =====================================================================
      Panel
      ===================================================================== */
   function moduleLeaves(mod) {
@@ -754,6 +1222,9 @@
     opts = opts || {};
     const leaf = NODES.get(id);
     if (!leaf) return;
+    state.panelLesson = null;
+    state.lessonCode = null;
+    updateLessonRail();
     const br = leaf.parent;
     if (state.focusId !== br.id) applyFocus(br.id, { keepPanel: true });
 
@@ -780,10 +1251,13 @@
     if (openLeaf) saveLast(openLeaf, panelBody.scrollTop, false);
     state.panelOpen = false;
     state.panelLeafId = null;
+    state.panelLesson = null;
+    state.lessonCode = null;
     panel.classList.remove('is-open');
     panel.setAttribute('aria-hidden', 'true');
     scrim.classList.remove('is-visible');
     NODES.forEach(n => n.el.classList.remove('is-active'));
+    updateLessonRail();
     if (!opts.silent) fitCamera(620);
   }
 
@@ -934,6 +1408,36 @@
           (b.title ? '<h3 class="block-title">' + esc(b.title) + '</h3>' : '') +
           (b.intro ? '<p class="task-intro">' + b.intro + '</p>' : '') +
           items + '</section>';
+      }
+
+      if (b.type === 'gap') {
+        const items = (b.items || []).map((it, i) => {
+          const sentence = String(it.q || '').replace('______',
+            '<input class="gap-input" type="text" inputmode="text" autocomplete="off" spellcheck="false" aria-label="Впиши пропущенное слово">');
+          return '<div class="gap-item" data-answer="' + attr(it.answer) + '" data-hint="' + attr(it.hint || '') + '">' +
+            '<div class="gap-q"><span class="num">' + (i + 1) + '.</span>' + sentence + '</div>' +
+            '<button class="gap-check" type="button" data-gap-check>Проверить</button>' +
+            '<div class="gap-result" hidden></div>' +
+          '</div>';
+        }).join('');
+        return '<section class="block gap-block">' +
+          (b.title ? '<h3 class="block-title">' + esc(b.title) + '</h3>' : '') +
+          (b.intro ? '<p class="task-intro">' + esc(b.intro) + '</p>' : '') +
+          '<div class="gap-list">' + items + '</div></section>';
+      }
+
+      if (b.type === 'write') {
+        const draft = b.draft || '';
+        const count = draft.trim() ? wordsLabel(draft.trim().split(/\s+/).length) : wordsLabel(0);
+        return '<section class="block write-block" data-write-key="' + attr(b.writeKey) + '" data-write-mod-id="' + attr(b.modId) + '" data-write-module="' + attr(b.module) + '" data-write-code="' + attr(b.lessonCode) + '" data-write-title="' + attr(b.lessonTitle) + '">' +
+          (b.title ? '<h3 class="block-title">' + esc(b.title) + '</h3>' : '') +
+          (b.prompt ? '<p class="task-intro">' + esc(b.prompt) + '</p>' : '') +
+          '<textarea class="write-input" data-write-input rows="4" placeholder="Напиши здесь 3–4 предложения…" aria-label="Мини-письмо">' + esc(draft) + '</textarea>' +
+          '<div class="write-actions"><button class="write-model-btn" type="button" data-write-model>Показать образец</button>' +
+          '<span class="write-count">' + count + '</span>' +
+          '<span class="write-note">Сначала напиши сам, потом сравни с образцом.</span></div>' +
+          '<div class="write-model" hidden><span class="lbl">Образец</span>' + (b.model || '') + '</div>' +
+        '</section>';
       }
 
       if (b.type === 'text') {
@@ -1297,6 +1801,17 @@
         });
       });
     });
+    LESSONS.forEach((list, modId) => {
+      const mod = NODES.get(modId);
+      if (!mod) return;
+      list.forEach(lesson => {
+        INDEX.push({
+          kind: 'lesson', id: modId, code: lesson.code,
+          title: lesson.code + ' · ' + lesson.title, sub: lesson.ru,
+          ctx: mod.title, mark: '📘', color: mod.color
+        });
+      });
+    });
   }
 
   function markText(text, q) {
@@ -1309,12 +1824,14 @@
   function runSearch(raw) {
     const q = String(raw || '').trim().toLowerCase();
     if (!q) { hideSearch(); return; }
-    const mods = [], topics = [], words = [], phrases = [];
+    const mods = [], lessons = [], topics = [], words = [], phrases = [];
     INDEX.forEach(item => {
       const t = (item.title || '').toLowerCase();
       const s = (item.sub || '').toLowerCase();
       if (item.kind === 'module') {
         if (t.includes(q) || s.includes(q)) mods.push(item);
+      } else if (item.kind === 'lesson') {
+        if (t.includes(q) || s.includes(q)) lessons.push(item);
       } else if (item.kind === 'branch' || item.kind === 'leaf') {
         if (t.includes(q) || s.includes(q)) topics.push(item);
       } else if (item.kind === 'word' && q.length >= 2) {
@@ -1328,22 +1845,24 @@
       const ib = (b.title || '').toLowerCase().indexOf(q);
       return (ia === 0 ? -1 : 0) - (ib === 0 ? -1 : 0) || ia - ib;
     });
-    rank(mods); rank(topics); rank(words); rank(phrases);
+    rank(mods); rank(lessons); rank(topics); rank(words); rank(phrases);
     const groups = [];
     if (mods.length) groups.push({ label: 'Модули', items: mods.slice(0, 4) });
+    if (lessons.length) groups.push({ label: 'Уроки', items: lessons.slice(0, 6) });
     if (topics.length) groups.push({ label: 'Темы', items: topics.slice(0, 6) });
     if (words.length) groups.push({ label: 'Слова', items: words.slice(0, 6) });
     if (phrases.length) groups.push({ label: 'Фразы', items: phrases.slice(0, 4) });
 
     if (!groups.length) {
-      searchResults.innerHTML = '<div class="search-empty">Ничего не нашлось. Попробуйте <b>Present</b>, <b>школа</b> или <b>food</b>.</div>';
+      searchResults.innerHTML = '<div class="search-empty">Ничего не нашлось. Попробуйте <b>2a</b>, <b>Present</b>, <b>школа</b> или <b>food</b>.</div>';
     } else {
       searchResults.innerHTML = groups.map(g =>
         '<div class="search-group">' + g.label + '</div>' + g.items.map(item => {
-          const kindLabel = item.kind === 'module' ? 'модуль' : item.kind === 'branch' ? 'раздел' : item.kind === 'leaf' ? 'тема' : item.kind === 'phrase' ? 'фраза' : 'слово';
+          const kindLabel = item.kind === 'module' ? 'модуль' : item.kind === 'lesson' ? 'урок' : item.kind === 'branch' ? 'раздел' : item.kind === 'leaf' ? 'тема' : item.kind === 'phrase' ? 'фраза' : 'слово';
           let sub = (item.kind === 'word' || item.kind === 'phrase') ? item.leaf.title : item.sub;
-          if ((item.kind === 'branch' || item.kind === 'leaf') && item.ctx) sub = item.sub + ' · ' + item.ctx;
+          if ((item.kind === 'branch' || item.kind === 'leaf' || item.kind === 'lesson') && item.ctx) sub = item.sub + ' · ' + item.ctx;
           return '<button class="search-item" type="button" role="option" data-kind="' + item.kind + '" data-id="' + item.id + '"' +
+            (item.code ? ' data-code="' + attr(item.code) + '"' : '') +
             (item.word ? ' data-word="' + attr(item.word) + '"' : '') +
             ' style="--mc:' + item.color + ';--mc-14:' + tint(item.color, .14) + '">' +
             '<span class="si-mark">' + esc(item.mark) + '</span>' +
@@ -1390,6 +1909,7 @@
     searchBox.classList.remove('has-value');
     searchInput.blur();
     if (kind === 'module' || kind === 'branch') applyFocus(id);
+    else if (kind === 'lesson') openLesson(id, el.dataset.code);
     else if (kind === 'leaf') openLeaf(id);
     else if (kind === 'word') openLeaf(id, { highlight: word });
     else if (kind === 'phrase') openLeaf(id);
@@ -1468,8 +1988,74 @@
       else applyFocus(b.dataset.crumb);
     });
 
+    const lessonRail = $('#lessonRail');
+    if (lessonRail) {
+      lessonRail.addEventListener('click', e => {
+        const chip = e.target.closest('[data-lesson]');
+        if (!chip) return;
+        const focus = state.focusId ? NODES.get(state.focusId) : null;
+        const mod = focus ? (focus.type === 'module' ? focus : focus.moduleNode) : null;
+        if (mod) openLesson(mod.id, chip.dataset.lesson);
+      });
+    }
+
     panel.addEventListener('click', e => {
       if (e.target.closest('[data-close-panel]')) { closePanel(); return; }
+
+      const lessonTopic = e.target.closest('[data-open-topic]');
+      if (lessonTopic) { openLeaf(lessonTopic.dataset.openTopic); return; }
+
+      const gapCheck = e.target.closest('[data-gap-check]');
+      if (gapCheck) { checkGap(gapCheck); return; }
+
+      const writeModel = e.target.closest('[data-write-model]');
+      if (writeModel) {
+        const block = writeModel.closest('.write-block');
+        const model = block && block.querySelector('.write-model');
+        if (model) {
+          model.hidden = !model.hidden;
+          writeModel.textContent = model.hidden ? 'Показать образец' : 'Скрыть образец';
+        }
+        return;
+      }
+
+      const lessonStudy = e.target.closest('[data-lesson-study]');
+      if (lessonStudy && state.panelLesson) {
+        const mod = NODES.get(state.panelLesson.modId);
+        const list = mod ? LESSONS.get(mod.id) : null;
+        const lesson = list ? list.find(x => x.code === state.panelLesson.code) : null;
+        if (mod && lesson) toggleLessonStudied(mod, lesson);
+        return;
+      }
+
+      if (e.target.closest('[data-lesson-test]') && state.panelLesson) {
+        const mod = NODES.get(state.panelLesson.modId);
+        if (mod && window.SP5UI && SP5UI.openTest) SP5UI.openTest(mod.id);
+        return;
+      }
+
+      const lessonPrev = e.target.closest('[data-lesson-prev]');
+      if (lessonPrev && state.panelLesson) {
+        const mod = NODES.get(state.panelLesson.modId);
+        const list = mod ? LESSONS.get(mod.id) : null;
+        if (mod && list) {
+          const i = list.findIndex(x => x.code === state.panelLesson.code);
+          if (i > 0) openLesson(mod.id, list[i - 1].code);
+        }
+        return;
+      }
+
+      const lessonNext = e.target.closest('[data-lesson-next]');
+      if (lessonNext && state.panelLesson) {
+        const mod = NODES.get(state.panelLesson.modId);
+        const list = mod ? LESSONS.get(mod.id) : null;
+        if (mod && list) {
+          const i = list.findIndex(x => x.code === state.panelLesson.code);
+          if (i >= 0 && i < list.length - 1) openLesson(mod.id, list[i + 1].code);
+        }
+        return;
+      }
+
       const study = e.target.closest('[data-study]');
       if (study) {
         const lf = NODES.get(state.panelLeafId);
@@ -1566,6 +2152,32 @@
       if (say) speak(say.getAttribute('data-say'));
     });
 
+    panelBody.addEventListener('input', e => {
+      const input = e.target.closest('[data-write-input]');
+      if (!input) return;
+      const block = input.closest('.write-block');
+      if (!block) return;
+      const key = block.dataset.writeKey;
+      const text = input.value;
+      const all = readWritings();
+      if (text.trim()) {
+        all[key] = {
+          key: key,
+          text: text,
+          updated: new Date().toISOString(),
+          modId: block.dataset.writeModId,
+          module: block.dataset.writeModule,
+          code: block.dataset.writeCode,
+          title: block.dataset.writeTitle
+        };
+      } else {
+        delete all[key];
+      }
+      writeWritings(all);
+      const count = block.querySelector('.write-count');
+      if (count) count.textContent = wordsLabel(text.trim() ? text.trim().split(/\s+/).length : 0) + ' · сохранено';
+    });
+
     let lastScrollSave = 0;
     panelBody.addEventListener('scroll', () => {
       if (!state.panelLeafId) return;
@@ -1577,6 +2189,12 @@
     }, { passive: true });
 
     panelBody.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && e.target.closest('.gap-input')) {
+        e.preventDefault();
+        const btn = e.target.closest('.gap-item') && e.target.closest('.gap-item').querySelector('[data-gap-check]');
+        if (btn && !btn.disabled) btn.click();
+        return;
+      }
       if (e.key !== 'Enter' && e.key !== ' ') return;
       const word = e.target.closest('.word');
       if (word) { e.preventDefault(); speak(word.dataset.say); }
@@ -1771,6 +2389,7 @@
     initSpeech();
     applyExtras();
     buildTree();
+    buildLessons();
     mountAll();
     buildDock();
     buildMobileHome();
@@ -1797,6 +2416,15 @@
     const startLeaf = params.get('leaf');
     const startCards = params.get('cards');
     if (startFocus && NODES.has(startFocus)) applyFocus(startFocus);
+    const startLesson = params.get('lesson');
+    if (startLesson) {
+      let found = null;
+      LESSONS.forEach((list, modId) => {
+        const lesson = list.find(x => x.code === startLesson);
+        if (lesson && !found) found = { modId: modId, code: lesson.code };
+      });
+      if (found) openLesson(found.modId, found.code);
+    }
     if (startLeaf && NODES.has(startLeaf)) openLeaf(startLeaf, { highlight: params.get('word') || '' });
     if (startCards && NODES.has(startCards)) setTimeout(() => openCards(startCards), 120);
     const startQuery = params.get('q');
@@ -1814,9 +2442,13 @@
     state: state,
     NODES: NODES,
     MODULES: MODULES,
+    LESSONS: LESSONS,
     ROOT: ROOT,
     TOTAL_LEAVES: TOTAL_LEAVES,
     openLeaf: openLeaf,
+    openLesson: openLesson,
+    readWritings: readWritings,
+    deleteWriting: deleteWriting,
     openCards: openCards,
     closePanel: closePanel,
     applyFocus: applyFocus,
